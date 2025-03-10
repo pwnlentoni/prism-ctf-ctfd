@@ -1,29 +1,22 @@
 from CTFd.plugins.dynamic_challenges import DynamicChallenge, DynamicValueChallenge
 
-from CTFd.models import (
-    Files,
-    db,
-)
+from CTFd.models import db
 from CTFd.exceptions.challenges import (
     ChallengeCreateException,
     ChallengeUpdateException,
 )
 
-import CTFd.utils.uploads as ctfd_uploads
-from CTFd.utils.uploads.uploaders import FilesystemUploader
-
 from flask import Request
-from lightkube import codecs
 from lightkube import ApiError
 
 import json
 
 from .blueprint import blueprint
 from ..utils import get_logger, get_current_user, ASSETS_DIR
-from ..k8s import kube, FIELD_MANAGER, API_VERSION, SHARED_KIND, get_shared_chall_type
+from ..k8s import kube, FIELD_MANAGER, SHARED_KIND, get_shared_chall_type
+from .utils import get_kube_spec_file
 
 logger = get_logger(__name__)
-uploader: FilesystemUploader = ctfd_uploads.get_uploader()
 
 
 class DynamicSharedChallenge(DynamicChallenge):
@@ -65,30 +58,9 @@ class DynamicSharedValueChallenge(DynamicValueChallenge):
 
     @staticmethod
     def get_kube_spec(chal: DynamicSharedChallenge):
-        yaml_file: Files = Files.query.filter_by(id=int(chal.yaml_id)).first()
-        with uploader.open(yaml_file.location, mode="r") as f:
-            objs = codecs.load_all_yaml(f.read())
+        challenge_def = get_kube_spec_file(chal.yaml_id, SHARED_KIND)
 
-        if len(objs) != 1:
-            err = f"yaml file doesn't contain a single object, found {len(objs)}"
-            logger.error(err)
-            raise Exception(err)
-
-        challenge_def = objs[0]
-
-        if challenge_def.metadata is None:
-            raise Exception("malformed yaml definition, missing metadata")
-
-        if challenge_def.apiVersion != API_VERSION:
-            raise Exception(
-                f"bad object api version `{challenge_def.apiVersion}` != `{API_VERSION}`"
-            )
-
-        if challenge_def.kind != SHARED_KIND:
-            raise Exception(
-                f"bad object kind `{challenge_def.kind}` != `{SHARED_KIND}`"
-            )
-
+        assert challenge_def.metadata
         if challenge_def["metadata"].get("labels") is None:
             challenge_def["metadata"]["labels"] = {}
 
