@@ -1,0 +1,15 @@
+{% extends "challenge.html" %}
+
+{% import "connection_info.html" as conn_info %}
+
+{% block connection_info %}
+    {% set conn = challenge.connection_info %}
+    {% if not conn %}
+        <div class="alert alert-danger" role="alert">
+            <span class="sr-only">Error:</span>
+            An error occured, please open a ticket mentioning the challenge name.
+        </div>
+    {% else %}
+        {{ conn_info.connection_info("CTFd._internal.challenge.data.connection_info") }}
+    {% endif %}
+{% endblock %}

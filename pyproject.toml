@@ -1,0 +1,18 @@
+[project]
+name = "prism-ctf-ctfd"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "lightkube>=0.17.1",
+]
+
+[dependency-groups]
+dev = [
+    "flask==2.0.3",
+    "flask-marshmallow==0.10.1",
+    "flask-restx==1.1.0",
+    "marshmallow==2.20.2",
+    "marshmallow-sqlalchemy==0.17.0",
+]

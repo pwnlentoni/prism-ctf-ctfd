@@ -1,0 +1,30 @@
+{# I imagine this whole thing could be classified as war crimes but whatever #}
+{# TODO: CTFd._internal.challenge.data is undefined in preview #}
+
+
+{% macro connection_info(info_obj) %}
+<div x-data="{ binds: {{ info_obj }}.sort((a, b) => (a.name || '').localeCompare(b.name || '')) }">
+    <template x-for="bind in binds">
+        <div x-data="{name: bind.name || 'Challenge', host: bind.hostname, ssl: !bind.port}">
+            <template x-if="bind.protocol == 'HTTP'" x-data="{port: bind.port ?? '{{ prism_default_http_port }}', proto: ssl ? 'https' : 'http'}">
+                <div x-data="{link: `${proto}://${host}:${port}/`}">
+                    <span x-text="name"></span> <br/>
+                    <a x-bind:href="link" x-text="link"></a>
+                </div>
+            </template>
+            <template x-if="bind.protocol == 'TCP'" x-data="{port: bind.port ?? '{{ prism_default_tcp_port }}'}">
+                <div>
+                    <span x-text="name"></span> <br/>
+                    <template x-if="!ssl">
+                        <code x-text="`nc ${host} ${port}`"></code>
+                    </template>
+                    <template x-if="ssl">
+                        {# TODO: add tabs to pick ncat/openssl s_client/pwntools #}
+                        <code x-text="`ncat --ssl ${host} ${port}`"></code>
+                    </template>
+                </div>
+            </template>
+        </div>
+    </template>
+</div>
+{% endmacro %}
