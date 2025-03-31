@@ -1,26 +1,83 @@
 {# I imagine this whole thing could be classified as war crimes but whatever #}
 {# TODO: CTFd._internal.challenge.data is undefined in preview #}
 
-
 {% macro connection_info(info_obj) %}
-<div x-data="{ binds: {{ info_obj }}.sort((a, b) => (a.name || '').localeCompare(b.name || '')) }">
+<div x-data="{ binds: {{ info_obj }}.sort((a, b) => (a.name || '').localeCompare(b.name || '')) }" class="pt-2 mb-4">
     <template x-for="bind in binds">
-        <div x-data="{name: bind.name || 'Challenge', host: bind.hostname, ssl: !bind.port}">
+        <div x-data="{name: bind.name || (binds.length != 1 ? 'Challenge' : ''), host: bind.hostname, ssl: !bind.port}" class="pb-4">
             <template x-if="bind.protocol == 'HTTP'" x-data="{port: bind.port ?? '{{ prism_default_http_port }}', proto: ssl ? 'https' : 'http'}">
-                <div x-data="{link: `${proto}://${host}:${port}/`}">
+                <div x-data="{link: `${proto}://${host}${port == '443' ? '' : (':' + port)}/`}">
                     <span x-text="name"></span> <br/>
                     <a x-bind:href="link" x-text="link"></a>
                 </div>
             </template>
             <template x-if="bind.protocol == 'TCP'" x-data="{port: bind.port ?? '{{ prism_default_tcp_port }}'}">
                 <div>
-                    <span x-text="name"></span> <br/>
-                    <template x-if="!ssl">
+                    <span x-text="name" class="d-block mb-1"></span>
+                    <template x-if="!ssl" x-data="{id: $id('tcp-tabs')}">
+                        <div>
+                            <ul class="nav nav-tabs mb-2" role="tablist">
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link active" data-bs-toggle="tab" :data-bs-target="`#${id}-ncat`" type="button" role="tab" :aria-controls="`${id}-ncat`" aria-selected="false">ncat</button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" data-bs-toggle="tab" :data-bs-target="`#${id}-nc`" type="button" role="tab" :aria-controls="`${id}-nc`" aria-selected="false">nc</button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" data-bs-toggle="tab" :data-bs-target="`#${id}-pwnlib`" type="button" role="tab" :aria-controls="`${id}-pwnlib`" aria-selected="false">pwntools</button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" data-bs-toggle="tab" :data-bs-target="`#${id}-socat`" type="button" role="tab" :aria-controls="`${id}-socat`" aria-selected="false">socat</button>
+                                </li>
+                            </ul>
+                            <div class="tab-content">
+                                <div class="tab-pane fade show active" :id="`${id}-ncat`" role="tabpanel" tabindex="0">{# -#}
+                                    <code class="d-block" x-text="`ncat ${host} ${port}`"></code>
+                          {#- #}</div>
+                                <div class="tab-pane fade" :id="`${id}-nc`" role="tabpanel" tabindex="0">{# -#}
+                                    <code class="d-block" x-text="`nc ${host} ${port}`"></code>
+                          {#- #}</div>
+                                <div class="tab-pane fade" :id="`${id}-pwnlib`" role="tabpanel" tabindex="0">{# -#}
+                                    <code class="d-block" x-text="`remote('${host}', ${port})`"></code>
+                          {#- #}</div>
+                                <div class="tab-pane fade" :id="`${id}-socat`" role="tabpanel" tabindex="0">{# -#}
+                                    <code class="d-block" x-text="`socat - tcp:${host}:${port}`"></code>
+                          {#- #}</div>
+                            </div>
+                        </div>
                         <code x-text="`nc ${host} ${port}`"></code>
                     </template>
-                    <template x-if="ssl">
-                        {# TODO: add tabs to pick ncat/openssl s_client/pwntools #}
-                        <code x-text="`ncat --ssl ${host} ${port}`"></code>
+                    <template x-if="ssl" x-data="{id: $id('ssl-tabs')}">
+                        <div>
+                            <ul class="nav nav-tabs mb-2" role="tablist">
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link active" data-bs-toggle="tab" :data-bs-target="`#${id}-ncat`" type="button" role="tab" :aria-controls="`${id}-ncat`" aria-selected="false">ncat</button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" data-bs-toggle="tab" :data-bs-target="`#${id}-openssl`" type="button" role="tab" :aria-controls="`${id}-openssl`" aria-selected="false">openssl</button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" data-bs-toggle="tab" :data-bs-target="`#${id}-pwnlib`" type="button" role="tab" :aria-controls="`${id}-pwnlib`" aria-selected="false">pwntools</button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" data-bs-toggle="tab" :data-bs-target="`#${id}-socat`" type="button" role="tab" :aria-controls="`${id}-socat`" aria-selected="false">socat</button>
+                                </li>
+                            </ul>
+                            <div class="tab-content">
+                                <div class="tab-pane fade show active" :id="`${id}-ncat`" role="tabpanel" tabindex="0">{# -#}
+                                    <code class="d-block" x-text="`ncat --ssl ${host} ${port}`"></code>
+                          {#- #}</div>
+                                <div class="tab-pane fade" :id="`${id}-openssl`" role="tabpanel" tabindex="0">{# -#}
+                                    <code class="d-block" x-text="`openssl s_client -quiet -verify_quiet -connect ${host}:${port}`"></code>
+                          {#- #}</div>
+                                <div class="tab-pane fade" :id="`${id}-pwnlib`" role="tabpanel" tabindex="0">{# -#}
+                                    <code class="d-block" x-text="`remote('${host}', ${port}, ssl=True)`"></code>
+                          {#- #}</div>
+                                <div class="tab-pane fade" :id="`${id}-socat`" role="tabpanel" tabindex="0">{# -#}
+                                    <code class="d-block" x-text="`socat - openssl:${host}:${port}`"></code>
+                          {#- #}</div>
+                            </div>
+                        </div>
                     </template>
                 </div>
             </template>

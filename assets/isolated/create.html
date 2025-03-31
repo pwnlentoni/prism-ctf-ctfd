@@ -1,0 +1,88 @@
+{% extends "admin/challenges/create.html" %}
+
+{% block header %}
+<div class="alert alert-secondary" role="alert">
+	Isolated challenges are hosted using prism-ctf, each player can spawn a dedicated instance on-demand.
+	Flags are generated per-player.
+</div>
+{% endblock %}
+
+{% block value %}
+{# prism specific fields #}
+
+<div class="form-group">
+	<label for="value">Destroy on flag<br>
+		<small class="form-text text-muted">
+			<span>If enabled, the instance will be destroyed when the player flags the challenge.
+				It is disabled by default.</span>
+		</small>
+	</label>
+	<select id="select-dof" class="custom-select" name="destroy_on_flag">
+		<option value=true>Enabled</option>
+		<option value=false selected>Disabled</option>
+	</select>
+</div>
+
+<div class="form-group">
+	<label for="value">YAML challenge spec<br>
+		<small class="form-text text-muted">
+			This is the YAML file containing the challenge definition
+		</small>
+	</label>
+	<input type="file" class="form-control" id="yaml" name="scenario" accept=".yaml" required>
+	<input type="hidden" id="yaml_id" class="form-control" name="yaml_id">
+</div>
+
+{# standard dynamic value fields #}
+<div class="form-group">
+	<label for="value">Initial Value<br>
+		<small class="form-text text-muted">
+			This is how many points the challenge is worth initially.
+		</small>
+	</label>
+	<input type="number" class="form-control" name="initial" placeholder="Enter value" required>
+</div>
+
+<div class="form-group">
+	<label for="value">Decay Function<br>
+		<small class="form-text text-muted">
+			<span>How the dynamic value will be calculated based on the Decay value</span>
+			<ul>
+				<li>Linear: Calculated as <code>Initial - (Decay * SolveCount)</code></li>
+				<li>Logarithmic: Calculated as <code>(((Minimum - Initial) / (Decay^2)) * (SolveCount^2)) + Initial</code></li>
+			</ul>
+		</small>
+	</label>
+	<select name="function" class="custom-select">
+		<option value="linear">Linear</option>
+		<option value="logarithmic">Logarithmic</option>
+	</select>
+</div>
+
+<div class="form-group">
+	<label for="value">Decay<br>
+		<small class="form-text text-muted">
+			<span>The decay value is used differently depending on the above Decay Function</span>
+			<ul>
+				<li>Linear: The amount of points deducted per solve. Equal deduction per solve.</li>
+				<li>Logarithmic: The amount of solves before the challenge reaches its minimum value. Earlier solves will lose less
+					points. Later solves will lose more points</li>
+			</ul>
+		</small>
+	</label>
+	<input type="number" class="form-control" name="decay" min="1" placeholder="Enter Decay value" required>
+</div>
+
+<div class="form-group">
+	<label for="value">Minimum Value<br>
+		<small class="form-text text-muted">
+			This is the lowest that the challenge can be worth
+		</small>
+	</label>
+	<input type="number" class="form-control" name="minimum" placeholder="Enter minimum value" required>
+</div>
+{% endblock %}
+
+{% block type %}
+<input type="hidden" value="prism_isolated" name="type" id="chaltype">
+{% endblock %}

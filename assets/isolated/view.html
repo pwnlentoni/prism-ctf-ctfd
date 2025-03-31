@@ -1,0 +1,33 @@
+{% extends "challenge.html" %}
+
+{% import "connection_info.html" as conn_info %}
+
+{% block description %}
+{{ super() }}
+
+<div x-data="{store: $store.prism_instance}">
+    <template x-if="store.error">
+        <div class="alert alert-danger alert-dismissible mb-2" role="alert">
+            <span x-text="store.error"></span>
+            <button type="button" class="btn-close" aria-label="Close" @click="store.error = null"></button>
+        </div>
+    </template>
+    <template x-if="!store.exists">
+        <div class="d-flex mb-2">
+            <button class="btn btn-success flex-grow-1 my-2" @click="store.create()">Create instance</button>
+        </div>
+    </template>
+    <template x-if="store.exists">
+        <div class="d-flex mb-2">
+            <button class="btn btn-primary flex-grow-1 my-2 me-1" @click="store.extend()">Extend instance</button>
+            <button class="btn btn-danger flex-grow-1 my-2 ms-1" @click="store.delete()">Delete instance</button>
+        </div>
+    </template>
+    <template x-if="store.exists && store.detail?.expiration" x-data="{expiration: new Date(store.detail?.expiration)}">
+        <span>Instance expires at <span x-text="expiration.toLocaleTimeString()"></span></span>
+    </template>
+    <template x-if="store.exists && store.detail?.ready === true">
+        {{ conn_info.connection_info("store.detail.exposedUrls") }}
+    </template>
+</div>
+{% endblock %}

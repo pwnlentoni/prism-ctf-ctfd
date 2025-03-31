@@ -2,16 +2,18 @@ import sys
 import subprocess
 
 from CTFd.api import CTFd_API_v1
-from CTFd.plugins import register_plugin_assets_directory
+from CTFd.config import Config
+from CTFd.plugins import register_admin_plugin_script, register_plugin_assets_directory
 from CTFd.plugins.challenges import CHALLENGE_CLASSES
 from CTFd.plugins.migrations import upgrade
-from CTFd.plugins import register_admin_plugin_script
 
 from flask import Blueprint
 
 try:
     import lightkube
 except ModuleNotFoundError:
+    # this atrocious thing is a workaround for CTFd only installing `requirements.txt` at docker build time
+    # this allows us to just mount the plugin as a volume and have everything just work.
     subprocess.check_call([sys.executable, "-m", "pip", "install", "lightkube==0.17.1"])
     import lightkube  # noqa: F401
 
@@ -20,11 +22,21 @@ from lightkube.generic_resource import load_in_cluster_generic_resources
 from . import utils
 from .api import admin_namespace, user_namespace
 from .k8s import kube
-from .models import DynamicSharedValueChallenge
+from .models import DynamicSharedValueChallenge, DynamicIsolatedValueChallenge
+
+_CHALLENGE_TYPES = [
+    DynamicSharedValueChallenge,
+    DynamicIsolatedValueChallenge,
+]
 
 
 def load(app):
     logger = utils.get_logger(__name__)
+
+    if not Config.SERVER_SENT_EVENTS:
+        err = "server sent events are required for prism-ctf to work"
+        logger.critical(err)
+        raise Exception(err)
 
     app.config["RESTX_ERROR_404_HELP"] = False
     app.db.create_all()
@@ -45,7 +57,8 @@ def load(app):
     except Exception as e:
         raise Exception("failed to setup kube resources") from e
 
-    CHALLENGE_CLASSES[DynamicSharedValueChallenge.id] = DynamicSharedValueChallenge  # type: ignore
+    for chall_type in _CHALLENGE_TYPES:
+        CHALLENGE_CLASSES[chall_type.id] = chall_type
     logger.info("challenge types registered")
 
     page_blueprint = Blueprint(
@@ -60,5 +73,6 @@ def load(app):
     CTFd_API_v1.add_namespace(user_namespace, path="/plugins/prism_ctf")
     app.register_blueprint(page_blueprint)
     logger.info("api namespaces added")
+    # TODO: read from config/env
     app.jinja_env.globals.update(prism_default_tcp_port="1337")
-    app.jinja_env.globals.update(prism_default_http_port="8443")
+    app.jinja_env.globals.update(prism_default_http_port="443")

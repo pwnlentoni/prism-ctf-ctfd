@@ -43,3 +43,16 @@ def get_kube_spec_file(file_id: Any, expected_kind: str) -> AnyResource:
     if challenge_def.kind != expected_kind:
         raise Exception(f"bad object kind `{challenge_def.kind}` != `{expected_kind}`")
     return challenge_def
+
+
+def constant_time_compare(a: str, b: str, case_insensitive: bool) -> bool:
+    if len(a) != len(b):
+        return False
+    if case_insensitive:
+        it = zip(a.lower(), b.lower())
+    else:
+        it = zip(a, b)
+    result = 0
+    for x, y in it:
+        result |= ord(x) ^ ord(y)
+    return result == 0

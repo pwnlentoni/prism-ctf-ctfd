@@ -1,0 +1,10 @@
+.venv
+.git
+.ruff_cache
+.gitignore
+.python-version
+uv.lock
+pyproject.toml
+Dockerfile
+.dockerignore
+README.md

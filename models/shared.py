@@ -13,7 +13,7 @@ import json
 
 from .blueprint import blueprint
 from ..utils import get_logger, get_current_user, ASSETS_DIR
-from ..k8s import kube, FIELD_MANAGER, SHARED_KIND, get_shared_chall_type
+from ..k8s import kube, FIELD_MANAGER, SHARED_KIND, CTFD_ID_LABEL, get_shared_chall_type
 from .utils import get_kube_spec_file
 
 logger = get_logger(__name__)
@@ -40,15 +40,15 @@ class DynamicSharedValueChallenge(DynamicValueChallenge):
     id = "prism_shared"
     name = "prism_shared"
     templates = {  # Nunjucks templates used for each aspect of challenge editing & viewing
-        "create": f"{ASSETS_DIR}/shared-create.html",  # nunjucks on admin create
-        "update": f"{ASSETS_DIR}/shared-update.html",  # nunjucks on admin update
-        "view": f"{ASSETS_DIR}/shared-view.html",  # nunjucks on admin preview, also used as a jinja template by user frontend, thanks ctfd
+        "create": f"{ASSETS_DIR}/shared/create.html",  # nunjucks on admin create
+        "update": f"{ASSETS_DIR}/shared/update.html",  # nunjucks on admin update
+        "view": f"{ASSETS_DIR}/shared/view.html",  # nunjucks on admin preview, also used as a jinja template by user frontend, thanks ctfd
     }
 
     scripts = {  # Scripts that are loaded when a template is loaded
-        "create": f"{ASSETS_DIR}/shared-create.js",
-        "update": f"{ASSETS_DIR}/shared-update.js",
-        "view": f"{ASSETS_DIR}/shared-view.js",
+        "create": f"{ASSETS_DIR}/shared/create.js",
+        "update": f"{ASSETS_DIR}/shared/update.js",
+        "view": f"{ASSETS_DIR}/shared/view.js",
     }
     # Route at which files are accessible. This must be registered using register_plugin_assets_directory()
     route = f"{ASSETS_DIR}/"
@@ -64,14 +64,13 @@ class DynamicSharedValueChallenge(DynamicValueChallenge):
         if challenge_def["metadata"].get("labels") is None:
             challenge_def["metadata"]["labels"] = {}
 
-        assert challenge_def.metadata.labels
-        challenge_def.metadata.labels["prism-ctf.pwnlentoni.team/ctfd-id"] = str(
-            chal.id
-        )
+        assert challenge_def.metadata.labels is not None
+        challenge_def.metadata.labels[CTFD_ID_LABEL] = str(chal.id)
         return challenge_def
 
     @classmethod
     def create(cls, request: Request):
+        #TODO: refresh challenge after creation + kube ready
         user = get_current_user()
         logger.debug(f"shared challenge created by {user.name!r} [id: {user.id}]")
         data = request.form.to_dict() or request.get_json()
@@ -112,7 +111,13 @@ class DynamicSharedValueChallenge(DynamicValueChallenge):
             )
             super().delete(challenge)
             logger.info(f"deleted successfully {challenge.name!r}")
-            raise ChallengeCreateException("kube apply failed") from e
+
+            if isinstance(e, ApiError):
+                raise ChallengeCreateException(
+                    f"kube apply failed: {e.status.message}"
+                ) from e
+            else:
+                raise ChallengeCreateException("kube apply failed") from e
 
         return challenge
 
@@ -140,6 +145,7 @@ class DynamicSharedValueChallenge(DynamicValueChallenge):
 
     @classmethod
     def update(cls, challenge: DynamicSharedChallenge, request: Request):
+        #TODO: refresh challenge after kube picks it up and marks it ready
         user = get_current_user()
         logger.debug(
             f"shared challenge update requested by {user.name!r} [id: {user.id}] for {challenge.name!r} [id: {challenge.id}]"
@@ -155,7 +161,12 @@ class DynamicSharedValueChallenge(DynamicValueChallenge):
                 logger.exception(
                     f"kube apply failed for shared chall {challenge.name!r} [id: {challenge.id}]"
                 )
-                raise ChallengeUpdateException("kube apply failed") from e
+                if isinstance(e, ApiError):
+                    raise ChallengeUpdateException(
+                        f"kube apply failed: {e.status.message}"
+                    ) from e
+                else:
+                    raise ChallengeUpdateException("kube apply failed") from e
 
         return super().update(challenge, request)
 

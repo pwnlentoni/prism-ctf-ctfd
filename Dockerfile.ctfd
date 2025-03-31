@@ -1,0 +1,10 @@
+FROM ctfd/ctfd:3.7.6
+
+COPY . /opt/CTFd/CTFd/plugins/prism_ctf
+
+RUN pip install --no-cache-dir -r requirements.txt \
+    && for d in CTFd/plugins/*; do \
+        if [ -f "$d/requirements.txt" ]; then \
+            pip install --no-cache-dir -r "$d/requirements.txt";\
+        fi; \
+    done;
