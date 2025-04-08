@@ -26,4 +26,11 @@ function showCurrentYaml() {
       })
 };
 
+document.getElementById("conn-info-refresh").addEventListener("click", (ev) => {
+  CTFd.fetch(`/api/v1/plugins/prism_ctf/admin/shared/refresh/${CHALLENGE_ID}`, {method: "POST"}).then(() => window.location.reload())
+  ev.preventDefault()
+  return false
+})
+
+Alpine.start()
 showCurrentYaml()
