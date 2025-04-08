@@ -31,6 +31,9 @@ document.getElementById("conn-info-refresh").addEventListener("click", (ev) => {
   ev.preventDefault()
   return false
 })
+document.addEventListener("DOMContentLoaded", () => {
+  const el = document.getElementById("conn-info")
+  el.innerText = JSON.stringify(JSON.parse(el.dataset["info"]), null, 2)
+})
 
-Alpine.start()
 showCurrentYaml()

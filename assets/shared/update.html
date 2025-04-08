@@ -10,8 +10,7 @@
 <div class="form-group">
 	<label for="conn-info">Connection Info</label>
 	<a class="btn btn-primary float-right" id="conn-info-refresh" href="#" role="button">Refresh</a> {# `a` is used instead of `button` because the latter doesn't work (maybe alpine conflicts with vue?) #}
-	{# TODO: remove this ugly hack and maybe stop using alpine #}
-	<pre id="conn-info" x-data="{info: JSON.parse(`{{ challenge.connection_info }}`)}" x-text="JSON.stringify(info, null, 2)"></pre>
+	<pre id="conn-info" data-info="{{ challenge.connection_info }}"></pre>
 	<small>If there are no info above pls refresh</small>
 </div>
 
