@@ -189,6 +189,9 @@ class DynamicIsolatedValueChallenge(DynamicValueChallenge):
             cache.delete_memoized(DynamicIsolatedChallenge.get_kube_name)
             cache.delete_memoized(DynamicIsolatedChallenge.get_lifetime)
 
+        if "destroy_on_flag" in data.keys():
+            data["destroy_on_flag"] = to_bool(data["destroy_on_flag"])
+
         return super().update(challenge, request)
 
     @classmethod

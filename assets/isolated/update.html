@@ -7,6 +7,19 @@
 {% block value %}
 {# prism specific fields #}
 
+<div class="form-group">
+	<label for="value">Destroy on flag<br>
+		<small class="form-text text-muted">
+			<span>If enabled, the instance will be destroyed when the player flags the challenge.
+				It is disabled by default.</span>
+		</small>
+	</label>
+	<select id="select-dof" class="custom-select" name="destroy_on_flag">
+		<option value=true {% if challenge.destroy_on_flag %}selected{% endif %} >Enabled</option>
+		<option value=false  {% if not challenge.destroy_on_flag %}selected{% endif %} >Disabled</option>
+	</select>
+</div>
+
 <div id="current-yaml-id" style="display: none;">{{ challenge.yaml_id }}</div>
 
 <div class="form-text">
