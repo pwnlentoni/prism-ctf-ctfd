@@ -1,4 +1,4 @@
-FROM ctfd/ctfd:3.7.6
+FROM ctfd/ctfd:3.7.7
 
 COPY . /opt/CTFd/CTFd/plugins/prism_ctf
 
