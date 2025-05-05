@@ -42,7 +42,7 @@ def refresh_shared_chall(id: int):
     assert chall_crd.metadata
 
     db.session.add(chall_model)
-    chall_model.connection_info = json.dumps(chall_model["status"]["exposedUrls"])
+    chall_model.connection_info = json.dumps(chall_crd["status"]["exposedUrls"])
     logger.info(
         f"refreshed shared challenge {chall_crd.metadata.name!r} [{chall_model.name!r} {chall_model.id}] connection info"
     )
