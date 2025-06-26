@@ -8,7 +8,7 @@
             <template x-if="bind.protocol == 'HTTP'" x-data="{port: bind.port ?? '{{ prism_default_http_port }}', proto: ssl ? 'https' : 'http'}">
                 <div x-data="{link: `${proto}://${host}${port == '443' ? '' : (':' + port)}/`}">
                     <span x-text="name"></span> <br/>
-                    <a x-bind:href="link" x-text="link"></a>
+                    <a x-bind:href="link" x-text="link" target="_blank"></a>
                 </div>
             </template>
             <template x-if="bind.protocol == 'TCP'" x-data="{port: bind.port ?? '{{ prism_default_tcp_port }}'}">
