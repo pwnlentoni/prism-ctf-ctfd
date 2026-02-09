@@ -22,11 +22,11 @@ from lightkube.generic_resource import load_in_cluster_generic_resources
 from . import utils
 from .api import admin_namespace, user_namespace
 from .k8s import kube
-from .models import DynamicSharedValueChallenge, DynamicIsolatedValueChallenge
+from .models import SharedValueChallenge, IsolatedValueChallenge
 
 _CHALLENGE_TYPES = [
-    DynamicSharedValueChallenge,
-    DynamicIsolatedValueChallenge,
+    SharedValueChallenge,
+    IsolatedValueChallenge,
 ]
 
 

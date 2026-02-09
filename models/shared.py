@@ -1,4 +1,5 @@
-from CTFd.plugins.dynamic_challenges import DynamicChallenge, DynamicValueChallenge
+from CTFd.models import Challenges
+from CTFd.plugins.challenges import BaseChallenge
 
 from CTFd.models import db
 from CTFd.exceptions.challenges import (
@@ -19,24 +20,24 @@ from .utils import get_kube_spec_file
 logger = get_logger(__name__)
 
 
-class DynamicSharedChallenge(DynamicChallenge):
+class SharedChallenge(Challenges):
     __mapper_args__ = {"polymorphic_identity": "prism_shared"}
     id = db.Column(
         db.Integer,
-        db.ForeignKey("dynamic_challenge.id", ondelete="CASCADE"),
+        db.ForeignKey("challenges.id", ondelete="CASCADE"),
         primary_key=True,
     )
 
     yaml_id = db.Column(db.Integer, db.ForeignKey("files.id"))
 
     def __init__(self, *args, **kwargs):
-        super(DynamicSharedChallenge, self).__init__(**kwargs)
+        super(SharedChallenge, self).__init__(**kwargs)
 
     def __str__(self):
-        return f"DynamicSharedChallenge(id={self.id})"
+        return f"SharedChallenge(id={self.id})"
 
 
-class DynamicSharedValueChallenge(DynamicValueChallenge):
+class SharedValueChallenge(BaseChallenge):
     id = "prism_shared"
     name = "prism_shared"
     templates = {  # Nunjucks templates used for each aspect of challenge editing & viewing
@@ -54,10 +55,10 @@ class DynamicSharedValueChallenge(DynamicValueChallenge):
     route = f"{ASSETS_DIR}/"
     # Blueprint used to access the static_folder directory.
     blueprint = blueprint
-    challenge_model = DynamicSharedChallenge
+    challenge_model = SharedChallenge
 
     @staticmethod
-    def get_kube_spec(chal: DynamicSharedChallenge):
+    def get_kube_spec(chal: SharedChallenge):
         challenge_def = get_kube_spec_file(chal.yaml_id, SHARED_KIND)
 
         assert challenge_def.metadata
@@ -122,14 +123,14 @@ class DynamicSharedValueChallenge(DynamicValueChallenge):
         return challenge
 
     @classmethod
-    def read(cls, challenge: DynamicSharedChallenge):
+    def read(cls, challenge: SharedChallenge):
         """
         This method is in used to access the data of a challenge in a format processable by the front end.
 
         :param challenge:
         :return: Challenge object, data dictionary to be returned to the user
         """
-        chal: DynamicSharedChallenge = DynamicSharedChallenge.query.filter_by(
+        chal: SharedChallenge = SharedChallenge.query.filter_by(
             id=challenge.id
         ).first()
         data = super().read(chal)
@@ -144,7 +145,7 @@ class DynamicSharedValueChallenge(DynamicValueChallenge):
         return data
 
     @classmethod
-    def update(cls, challenge: DynamicSharedChallenge, request: Request):
+    def update(cls, challenge: SharedChallenge, request: Request):
         #TODO: refresh challenge after kube picks it up and marks it ready
         user = get_current_user()
         logger.debug(
@@ -171,7 +172,7 @@ class DynamicSharedValueChallenge(DynamicValueChallenge):
         return super().update(challenge, request)
 
     @classmethod
-    def delete(cls, challenge: DynamicSharedChallenge):
+    def delete(cls, challenge: SharedChallenge):
         user = get_current_user()
         logger.debug(
             f"shared challenge delete requested by {user.name!r} [id: {user.id}] for {challenge.name!r} [id: {challenge.id}]"

@@ -1,6 +1,6 @@
 from .utils import get_logger
 from .k8s import list_shared_challenges, CTFD_ID_LABEL, get_shared_challenge
-from .models import DynamicSharedChallenge
+from .models import SharedChallenge
 from CTFd.models import (
     db,
 )
@@ -17,7 +17,7 @@ def refresh_shared_challs():
         assert chall.metadata
         assert chall.metadata.labels
         kube_id = int(chall.metadata.labels[CTFD_ID_LABEL])
-        chall_model: DynamicSharedChallenge = DynamicSharedChallenge.query.filter_by(
+        chall_model: SharedChallenge = SharedChallenge.query.filter_by(
             id=kube_id,
         ).first()
         if chall_model is None:
@@ -31,7 +31,7 @@ def refresh_shared_challs():
 
 
 def refresh_shared_chall(id: int):
-    chall_model: DynamicSharedChallenge = DynamicSharedChallenge.query.filter_by(
+    chall_model: SharedChallenge = SharedChallenge.query.filter_by(
         id=id
     ).first()
     if chall_model is None:

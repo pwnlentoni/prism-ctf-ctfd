@@ -17,7 +17,7 @@ from .utils import (
     get_current_user_account_id,
 )
 from .shared_challenges import refresh_shared_challs, refresh_shared_chall
-from .models import Instances, DynamicIsolatedChallenge
+from .models import Instances, IsolatedChallenge
 from .isolated_challenges import (
     create_instance,
     delete_instance,
@@ -76,7 +76,7 @@ class SharedRefreshSpecific(Resource):
 class ExtendIsolatedInstance(Resource):
     @staticmethod
     def post(id: int):
-        chal: DynamicIsolatedChallenge = DynamicIsolatedChallenge.query.get_or_404(id)
+        chal: IsolatedChallenge = IsolatedChallenge.query.get_or_404(id)
         if chal.state != "visible" and not is_admin():
             abort(404)
 
@@ -102,7 +102,7 @@ class ExtendIsolatedInstance(Resource):
 class IsolatedInstance(Resource):
     @staticmethod
     def get(id: int):
-        chal: DynamicIsolatedChallenge = DynamicIsolatedChallenge.query.get_or_404(id)
+        chal: IsolatedChallenge = IsolatedChallenge.query.get_or_404(id)
         if chal.state != "visible" and not is_admin():
             abort(404)
 
@@ -135,7 +135,7 @@ class IsolatedInstance(Resource):
 
     @staticmethod
     def put(id: int):
-        chal: DynamicIsolatedChallenge = DynamicIsolatedChallenge.query.get_or_404(id)
+        chal: IsolatedChallenge = IsolatedChallenge.query.get_or_404(id)
         if chal.state != "visible" and not is_admin():
             abort(404)
         user = get_current_user()
@@ -169,7 +169,7 @@ class IsolatedInstance(Resource):
 
     @staticmethod
     def delete(id: int):
-        chal: DynamicIsolatedChallenge = DynamicIsolatedChallenge.query.get_or_404(id)
+        chal: IsolatedChallenge = IsolatedChallenge.query.get_or_404(id)
         if chal.state != "visible" and not is_admin():
             abort(404)
         user = get_current_user()

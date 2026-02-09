@@ -14,7 +14,7 @@ import typing
 from collections.abc import Generator
 
 if typing.TYPE_CHECKING:
-    from .models import DynamicIsolatedChallenge
+    from .models import IsolatedChallenge
 from lightkube.models.meta_v1 import ObjectMeta
 from lightkube.generic_resource import GenericGlobalResource
 from lightkube.core.exceptions import ApiError
@@ -23,12 +23,12 @@ from .utils import get_logger
 logger = get_logger(__name__)
 
 
-def instance_name(owner: int, challenge: DynamicIsolatedChallenge) -> str:
+def instance_name(owner: int, challenge: IsolatedChallenge) -> str:
     return f"{challenge.get_kube_name()}-{owner}"
 
 
 def create_instance(
-    owner: int, challenge: DynamicIsolatedChallenge
+    owner: int, challenge: IsolatedChallenge
 ) -> GenericGlobalResource:
     ChallengeInstance = get_chall_instance_type()
     inst = ChallengeInstance(
@@ -54,7 +54,7 @@ def create_instance(
             raise
 
 
-def delete_instance(owner: int, challenge: DynamicIsolatedChallenge):
+def delete_instance(owner: int, challenge: IsolatedChallenge):
     try:
         kube.delete(get_chall_instance_type(), instance_name(owner, challenge))
     except ApiError as e:
@@ -65,7 +65,7 @@ def delete_instance(owner: int, challenge: DynamicIsolatedChallenge):
 
 
 def get_instance(
-    owner: int, challenge: DynamicIsolatedChallenge
+    owner: int, challenge: IsolatedChallenge
 ) -> GenericGlobalResource:
     try:
         return kube.get(get_chall_instance_type(), instance_name(owner, challenge))

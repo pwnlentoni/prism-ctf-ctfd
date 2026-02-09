@@ -1,7 +1,13 @@
 import datetime
 import json
 
-from CTFd.plugins.dynamic_challenges import DynamicChallenge, DynamicValueChallenge
+from CTFd.models import Challenges, Flags
+from CTFd.plugins.challenges import BaseChallenge, ChallengeResponse
+from CTFd.plugins.challenges.logic import (
+    challenge_attempt_all,
+    challenge_attempt_any,
+    challenge_attempt_team,
+)
 
 from CTFd.utils import get_config
 from CTFd.cache import cache
@@ -36,11 +42,11 @@ from ..isolated_challenges import delete_instance
 logger = get_logger(__name__)
 
 
-class DynamicIsolatedChallenge(DynamicChallenge):
+class IsolatedChallenge(Challenges):
     __mapper_args__ = {"polymorphic_identity": "prism_isolated"}
     id = db.Column(
         db.Integer,
-        db.ForeignKey("dynamic_challenge.id", ondelete="CASCADE"),
+        db.ForeignKey("challenges.id", ondelete="CASCADE"),
         primary_key=True,
     )
 
@@ -48,10 +54,12 @@ class DynamicIsolatedChallenge(DynamicChallenge):
     destroy_on_flag = db.Column(db.Boolean, default=False)
 
     def __init__(self, *args, **kwargs):
-        super(DynamicIsolatedChallenge, self).__init__(**kwargs)
+        super(IsolatedChallenge, self).__init__(**kwargs)
 
     def __str__(self):
-        return f"DynamicIsolatedChallenge(id={self.id}, destroy_on_flag={self.destroy_on_flag})"
+        return (
+            f"IsolatedChallenge(id={self.id}, destroy_on_flag={self.destroy_on_flag})"
+        )
 
     @cache.memoize()
     def get_kube_name(self) -> str:
@@ -66,7 +74,7 @@ class DynamicIsolatedChallenge(DynamicChallenge):
         return parse_golang_duration(spec["spec"]["lifetime"])
 
 
-class DynamicIsolatedValueChallenge(DynamicValueChallenge):
+class IsolatedValueChallenge(BaseChallenge):
     id = "prism_isolated"
     name = "prism_isolated"
     templates = {  # Nunjucks templates used for each aspect of challenge editing & viewing
@@ -84,7 +92,7 @@ class DynamicIsolatedValueChallenge(DynamicValueChallenge):
     route = f"{ASSETS_DIR}/"
     # Blueprint used to access the static_folder directory.
     blueprint = blueprint
-    challenge_model = DynamicIsolatedChallenge
+    challenge_model = IsolatedChallenge
 
     @classmethod
     def create(cls, request: Request):
@@ -141,14 +149,14 @@ class DynamicIsolatedValueChallenge(DynamicValueChallenge):
         return challenge
 
     @classmethod
-    def read(cls, challenge: DynamicIsolatedChallenge):
+    def read(cls, challenge: IsolatedChallenge):
         """
         This method is in used to access the data of a challenge in a format processable by the front end.
 
         :param challenge:
         :return: Challenge object, data dictionary to be returned to the user
         """
-        chal: DynamicIsolatedChallenge = DynamicIsolatedChallenge.query.filter_by(
+        chal: IsolatedChallenge = IsolatedChallenge.query.filter_by(
             id=challenge.id
         ).first()
         data = super().read(chal)
@@ -163,7 +171,7 @@ class DynamicIsolatedValueChallenge(DynamicValueChallenge):
         return data
 
     @classmethod
-    def update(cls, challenge: DynamicIsolatedChallenge, request: Request):
+    def update(cls, challenge: IsolatedChallenge, request: Request):
         user = get_current_user()
         logger.debug(
             f"isolated challenge update requested by {user.name!r} [id: {user.id}] for {challenge.name!r} [id: {challenge.id}]"
@@ -186,16 +194,16 @@ class DynamicIsolatedValueChallenge(DynamicValueChallenge):
                     ) from e
                 else:
                     raise ChallengeUpdateException("kube apply failed") from e
-            cache.delete_memoized(DynamicIsolatedChallenge.get_kube_name)
-            cache.delete_memoized(DynamicIsolatedChallenge.get_lifetime)
+            cache.delete_memoized(IsolatedChallenge.get_kube_name)
+            cache.delete_memoized(IsolatedChallenge.get_lifetime)
 
         if "destroy_on_flag" in data.keys():
-            data["destroy_on_flag"] = to_bool(data["destroy_on_flag"])
+            data["destroy_on_flag"] = to_bool(data["destroy_on_flag"])  # type: ignore
 
         return super().update(challenge, request)
 
     @classmethod
-    def delete(cls, challenge: DynamicIsolatedChallenge):
+    def delete(cls, challenge: IsolatedChallenge):
         user = get_current_user()
         logger.debug(
             f"isolated challenge delete requested by {user.name!r} [id: {user.id}] for {challenge.name!r} [id: {challenge.id}]"
@@ -231,18 +239,19 @@ class DynamicIsolatedValueChallenge(DynamicValueChallenge):
                 raise Exception("kube delete failed") from e
 
         super().delete(challenge)
-        cache.delete_memoized(DynamicIsolatedChallenge.get_kube_name)
-        cache.delete_memoized(DynamicIsolatedChallenge.get_lifetime)
+        cache.delete_memoized(IsolatedChallenge.get_kube_name)
+        cache.delete_memoized(IsolatedChallenge.get_lifetime)
         logger.info(
             f"deleted from CTFd challenge {challenge.name!r} [id: {challenge.id}]"
         )
 
     @classmethod
-    def _internal_attempt(
-        cls, challenge: DynamicIsolatedChallenge, request: Request
-    ) -> tuple[bool, str]:
+    def attempt(
+        cls, challenge: IsolatedChallenge, request: Request
+    ) -> ChallengeResponse:
         data = request.form or request.get_json()
         submission = data["submission"].strip()
+
         if get_config("user_mode") == "teams":
             user_instances: list[Instances] = (
                 Instances.query.filter_by(
@@ -259,31 +268,35 @@ class DynamicIsolatedValueChallenge(DynamicValueChallenge):
                 .order_by(Instances.started_at.desc())
                 .all()
             )
-        for instance in user_instances:
-            if constant_time_compare(submission, instance.flag, False):
-                return True, "Correct"
-        return False, "Incorrect"
 
-    @classmethod
-    def attempt(
-        cls, challenge: DynamicIsolatedChallenge, request: Request
-    ) -> tuple[bool, str]:
-        verdict, msg = cls._internal_attempt(challenge, request)
-        if not verdict:
-            verdict, msg = super().attempt(challenge, request)
-            if verdict:
-                user = get_current_user()
-                logger.warning(
-                    f"user {user.name!r} [id: {user.id}] submitted a flag catched by CTFd for challenge {challenge.name!r} [id: {challenge.id}]"
-                )
+        instance_flags_plain: list[str] = [f.flag for f in user_instances]
 
-        if verdict and challenge.destroy_on_flag:
+        instance_flags = [
+            Flags(challenge_id=challenge.id, type="static", content=flag, id=-(idx + 1)) # thanks CTFer.io for the workaround <3
+            for idx, flag in enumerate(instance_flags_plain)
+        ]
+        ctfd_flags = Flags.query.filter_by(challenge_id=challenge.id).all()
+
+        if challenge.logic == "all":
+            verdict = challenge_attempt_all(submission, challenge, ctfd_flags + instance_flags)
+        elif challenge.logic == "team":
+            verdict = challenge_attempt_team(submission, challenge, ctfd_flags + instance_flags)
+        else:
+            verdict = challenge_attempt_any(submission, challenge, ctfd_flags + instance_flags)
+        
+        if verdict.status == "correct" and submission not in instance_flags_plain:
+            user = get_current_user()
+            logger.warning(
+                f"user {user.name!r} [id: {user.id}] submitted a flag catched by CTFd for challenge {challenge.name!r} [id: {challenge.id}]"
+            )
+
+        if verdict.status == "correct" and challenge.destroy_on_flag:
             try:
                 delete_instance(get_current_user_account_id(), challenge)
-                msg = "Correct, instance destroyed"
+                verdict.message = "Correct, instance destroyed"
             except UserFacingNotFound:
                 pass
             except Exception:
                 logger.exception("error while deleting instance after flag")
 
-        return verdict, msg
+        return verdict

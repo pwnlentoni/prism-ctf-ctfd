@@ -6,7 +6,7 @@ class Instances(db.Model):  # type: ignore
     __tablename__ = "prism_instances"
     id = db.Column(db.Integer, primary_key=True)
     challenge_id = db.Column(
-        db.Integer, db.ForeignKey("dynamic_isolated_challenge.id", ondelete="CASCADE")
+        db.Integer, db.ForeignKey("isolated_challenge.id", ondelete="CASCADE")
     )
     user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"))
     team_id = db.Column(db.Integer, db.ForeignKey("teams.id", ondelete="CASCADE"))
@@ -17,5 +17,5 @@ class Instances(db.Model):  # type: ignore
     user = db.relationship("Users", foreign_keys="Instances.user_id", lazy="select")
     team = db.relationship("Teams", foreign_keys="Instances.team_id", lazy="select")
     challenge = db.relationship(
-        "DynamicIsolatedChallenge", foreign_keys="Instances.challenge_id", lazy="select"
+        "IsolatedChallenge", foreign_keys="Instances.challenge_id", lazy="select"
     )

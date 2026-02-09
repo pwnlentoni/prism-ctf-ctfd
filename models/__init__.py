@@ -1,13 +1,13 @@
-from .shared import DynamicSharedChallenge, DynamicSharedValueChallenge
+from .shared import SharedChallenge, SharedValueChallenge
 from .instance import Instances
-from .isolated import DynamicIsolatedChallenge, DynamicIsolatedValueChallenge
+from .isolated import IsolatedChallenge, IsolatedValueChallenge
 from .blueprint import blueprint
 
 __all__ = [
-    "DynamicSharedChallenge",
-    "DynamicSharedValueChallenge",
-    "DynamicIsolatedChallenge",
-    "DynamicIsolatedValueChallenge",
+    "SharedChallenge",
+    "SharedValueChallenge",
+    "IsolatedChallenge",
+    "IsolatedValueChallenge",
     "Instances",
     "blueprint",
 ]
