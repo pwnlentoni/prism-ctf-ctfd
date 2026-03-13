@@ -14,7 +14,7 @@ try:
 except ModuleNotFoundError:
     # this atrocious thing is a workaround for CTFd only installing `requirements.txt` at docker build time
     # this allows us to just mount the plugin as a volume and have everything just work.
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "lightkube==0.17.1"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "lightkube==0.19.1"])
     import lightkube  # noqa: F401
 
 from lightkube.generic_resource import load_in_cluster_generic_resources
