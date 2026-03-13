@@ -1,0 +1,229 @@
+{% extends "admin/base.html" %}
+
+{% block content %}
+<div class="jumbotron">
+    <div class="container">
+        <h1>Prism CTF</h1>
+        <p class="lead mb-0">Inspect isolated instances and shared challenges, view pod logs, and restart managed workloads to pick up new images.</p>
+    </div>
+</div>
+
+<div
+    class="container pb-5"
+    x-data="prismAdmin('{{ request.script_root }}/api/v1/plugins/prism_ctf/admin')"
+    x-init="init()"
+>
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h2 class="h4 mb-1">Runtime management</h2>
+            <p class="text-muted mb-0">The tables below are populated from the plugin API and current Kubernetes state.</p>
+        </div>
+        <button class="btn btn-primary" type="button" @click="loadOverview()" :disabled="loadingOverview">
+            <span x-show="!loadingOverview">Refresh</span>
+            <span x-show="loadingOverview">Refreshing…</span>
+        </button>
+    </div>
+
+    <template x-if="alert.message">
+        <div class="alert alert-dismissible fade show mb-3" :class="`alert-${alert.tone}`" role="alert">
+            <span x-text="alert.message"></span>
+            <button type="button" class="close" aria-label="Close" @click="alert = emptyAlert()">
+                <span aria-hidden="true">&times;</span>
+            </button>
+        </div>
+    </template>
+
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span>Shared challenges</span>
+            <span class="badge badge-secondary" x-text="sharedChallenges.length"></span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-striped table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Name</th>
+                        <th>Status</th>
+                        <th>Connections</th>
+                        <th class="text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-if="loadingOverview && !sharedChallenges.length">
+                        <tr>
+                            <td class="text-center text-muted" colspan="5">Loading shared challenges…</td>
+                        </tr>
+                    </template>
+                    <template x-if="!loadingOverview && !sharedChallenges.length && !overviewFailed">
+                        <tr>
+                            <td class="text-center text-muted" colspan="5">No shared challenges are registered.</td>
+                        </tr>
+                    </template>
+                    <template x-if="overviewFailed">
+                        <tr>
+                            <td class="text-center text-danger" colspan="5">Failed to load shared challenges.</td>
+                        </tr>
+                    </template>
+                    <template x-for="shared in sharedChallenges" :key="shared.id">
+                        <tr>
+                            <td x-text="`#${shared.id}`"></td>
+                            <td>
+                                <div class="font-weight-bold" x-text="shared.name"></div>
+                            </td>
+                            <td>
+                                <span class="badge" :class="statusBadgeClass(sharedStatus(shared).tone)" x-text="sharedStatus(shared).label"></span>
+                            </td>
+                            <td>
+                                <template x-if="!(shared.connection_info || []).length">
+                                    <span class="text-muted">—</span>
+                                </template>
+                                <template x-for="entry in (shared.connection_info || [])" :key="connectionKey(entry)">
+                                    <div><code x-text="connectionLabel(entry)"></code></div>
+                                </template>
+                            </td>
+                            <td class="text-right text-nowrap">
+                                <button
+                                    class="btn btn-sm btn-outline-secondary"
+                                    type="button"
+                                    @click="openLogs('shared', shared.id)"
+                                    :disabled="isBusy(actionKey('shared', 'logs', shared.id))"
+                                >Logs</button>
+                                <button
+                                    class="btn btn-sm btn-outline-primary"
+                                    type="button"
+                                    @click="restart('shared', shared.id)"
+                                    :disabled="isBusy(actionKey('shared', 'restart', shared.id))"
+                                >Restart rollouts</button>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span>Created instances</span>
+            <span class="badge badge-secondary" x-text="instances.length"></span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-striped table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Challenge</th>
+                        <th>Owner</th>
+                        <th>Started</th>
+                        <th>Status</th>
+                        <th>Connections</th>
+                        <th class="text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-if="loadingOverview && !instances.length">
+                        <tr>
+                            <td class="text-center text-muted" colspan="7">Loading instances…</td>
+                        </tr>
+                    </template>
+                    <template x-if="!loadingOverview && !instances.length && !overviewFailed">
+                        <tr>
+                            <td class="text-center text-muted" colspan="7">No instances have been created yet.</td>
+                        </tr>
+                    </template>
+                    <template x-if="overviewFailed">
+                        <tr>
+                            <td class="text-center text-danger" colspan="7">Failed to load instances.</td>
+                        </tr>
+                    </template>
+                    <template x-for="instance in instances" :key="instance.id">
+                        <tr>
+                            <td x-text="`#${instance.id}`"></td>
+                            <td>
+                                <div class="font-weight-bold" x-text="instance.challenge_name"></div>
+                                <div class="text-muted small" x-text="`Challenge ID ${instance.challenge_id}`"></div>
+                            </td>
+                            <td>
+                                <div x-text="ownerLabel(instance)"></div>
+                                <div class="text-muted small" x-text="instance.kube_name || ''"></div>
+                            </td>
+                            <td x-text="formatDate(instance.started_at)"></td>
+                            <td>
+                                <span class="badge" :class="statusBadgeClass(instanceStatus(instance).tone)" x-text="instanceStatus(instance).label"></span>
+                            </td>
+                            <td>
+                                <template x-if="!(instance.status?.exposedUrls || []).length">
+                                    <span class="text-muted">—</span>
+                                </template>
+                                <template x-for="entry in (instance.status?.exposedUrls || [])" :key="connectionKey(entry)">
+                                    <div><code x-text="connectionLabel(entry)"></code></div>
+                                </template>
+                            </td>
+                            <td class="text-right text-nowrap">
+                                <button
+                                    class="btn btn-sm btn-outline-secondary"
+                                    type="button"
+                                    @click="openLogs('instance', instance.id)"
+                                    :disabled="isBusy(actionKey('instance', 'logs', instance.id))"
+                                >Logs</button>
+                                <button
+                                    class="btn btn-sm btn-outline-primary"
+                                    type="button"
+                                    @click="restart('instance', instance.id)"
+                                    :disabled="isBusy(actionKey('instance', 'restart', instance.id))"
+                                >Restart rollouts</button>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <template x-if="logModal.open">
+        <div>
+            <div
+                class="position-fixed w-100 h-100"
+                style="top: 0; left: 0; background: rgba(0, 0, 0, 0.6); z-index: 1040;"
+                @click="closeLogs()"
+            ></div>
+            <div
+                class="position-fixed w-100 h-100 d-flex align-items-center justify-content-center p-3"
+                style="top: 0; left: 0; z-index: 1050;"
+                @keydown.escape.window="closeLogs()"
+            >
+                <div class="card shadow-lg w-100" style="max-width: 1100px; max-height: 90vh; overflow: hidden;">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0" x-text="logModal.title"></h5>
+                        <button type="button" class="close" aria-label="Close" @click="closeLogs()">
+                            <span aria-hidden="true">&times;</span>
+                        </button>
+                    </div>
+                    <div class="card-body" style="overflow-y: auto;">
+                        <div class="small text-muted mb-3" x-text="logSummary()"></div>
+                        <template x-if="!logModal.logs.length">
+                            <div class="text-muted">No logs were returned.</div>
+                        </template>
+                        <template x-for="entry in logModal.logs" :key="`${entry.pod}-${entry.container}`">
+                            <div class="card mb-3">
+                                <div class="card-header">
+                                    <strong x-text="entry.pod"></strong>
+                                    <span class="text-muted">/ <span x-text="entry.container"></span></span>
+                                </div>
+                                <div class="card-body bg-dark text-light">
+                                    <pre class="mb-0 text-light" style="white-space: pre-wrap; word-break: break-word; color: #f8f9fa; background: transparent;" x-text="entry.log || ''"></pre>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script defer src="{{ request.script_root }}/plugins/prism_ctf/assets/admin/prism_ctf.js"></script>
+{% endblock %}

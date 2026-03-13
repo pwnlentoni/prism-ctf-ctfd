@@ -17,7 +17,7 @@ from .utils import (
     get_current_user_account_id,
 )
 from .shared_challenges import refresh_shared_challs, refresh_shared_chall
-from .models import Instances, IsolatedChallenge
+from .models import Instances, IsolatedChallenge, SharedChallenge
 from .isolated_challenges import (
     create_instance,
     delete_instance,
@@ -25,8 +25,15 @@ from .isolated_challenges import (
     get_instance,
     extend_instance,
     get_instance_status,
+    instance_name,
 )
-from .k8s import UserFacingException, UserFacingNotFound
+from .k8s import (
+    UserFacingException,
+    UserFacingNotFound,
+    get_owned_pod_logs,
+    get_shared_challenge,
+    restart_owned_rollouts,
+)
 
 logger = get_logger(__name__)
 
@@ -42,6 +49,118 @@ user_namespace = Namespace(
 )
 
 
+def _serialize_datetime(value):
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return f"{value.isoformat()}Z"
+    return value.isoformat()
+
+
+def _parse_connection_info(value):
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _extract_ready_status(resource) -> dict | None:
+    status = resource.get("status", {}) if resource is not None else {}
+    conditions = status.get("conditions") or []
+    ready = next(
+        (condition for condition in conditions if condition.get("type") == "Ready"),
+        None,
+    )
+    if ready is None:
+        return None
+    return {"ready": ready.get("status") == "True"}
+
+
+def _get_instance_owner_id(instance: Instances) -> int:
+    if instance.team_id is not None:
+        return instance.team_id
+    if instance.user_id is not None:
+        return instance.user_id
+    raise UserFacingException("instance is missing both team and user ownership")
+
+
+def _get_admin_instance_root(instance: Instances):
+    if instance.challenge is None:
+        raise UserFacingException("instance challenge relationship is missing")
+    owner_id = _get_instance_owner_id(instance)
+    return get_instance(owner_id, instance.challenge)
+
+
+def _serialize_instance(instance: Instances) -> dict:
+    owner_id = _get_instance_owner_id(instance)
+    challenge = instance.challenge
+    if challenge is None:
+        raise UserFacingException("instance challenge relationship is missing")
+
+    status = None
+    crd_present = False
+    status_error = None
+    try:
+        kube_instance = _get_admin_instance_root(instance)
+        status = get_instance_status(kube_instance)
+        crd_present = True
+    except UserFacingNotFound:
+        pass
+    except Exception:
+        logger.exception(
+            "failed to fetch kubernetes status for instance %s", instance.id
+        )
+        status_error = "failed to fetch kubernetes status"
+
+    return {
+        "id": instance.id,
+        "challenge_id": challenge.id,
+        "challenge_name": challenge.name,
+        "owner_id": owner_id,
+        "user_id": instance.user_id,
+        "user_name": getattr(instance.user, "name", None),
+        "team_id": instance.team_id,
+        "team_name": getattr(instance.team, "name", None),
+        "started_at": _serialize_datetime(instance.started_at),
+        "kube_name": instance_name(owner_id, challenge),
+        "resource_present": crd_present,
+        "status": status,
+        "status_error": status_error,
+    }
+
+
+def _serialize_shared_challenge(challenge: SharedChallenge) -> dict:
+    connection_info = _parse_connection_info(challenge.connection_info)
+    crd_present = False
+    status = None
+    status_error = None
+
+    try:
+        kube_challenge = get_shared_challenge(challenge.id)
+    except Exception:
+        logger.exception("failed to fetch kubernetes shared challenge %s", challenge.id)
+        kube_challenge = None
+        status_error = "failed to fetch kubernetes status"
+
+    if kube_challenge is not None:
+        crd_present = True
+        status = _extract_ready_status(kube_challenge)
+        if kube_challenge.get("status", {}).get("exposedUrls"):
+            connection_info = kube_challenge["status"]["exposedUrls"]
+
+    return {
+        "id": challenge.id,
+        "name": challenge.name,
+        "connection_info": connection_info,
+        "resource_present": crd_present,
+        "status": status,
+        "status_error": status_error,
+    }
+
+
 @admin_namespace.route("/shared/refresh")
 class SharedRefreshAll(Resource):
     @staticmethod
@@ -54,7 +173,8 @@ class SharedRefreshAll(Resource):
             refresh_shared_challs()
             return {"success": True}
         except Exception as e:
-            return {"success": False, "error": repr(e)}
+            logger.exception("failed to refresh all shared challenges")
+            return {"success": False, "message": repr(e)}, 500
 
 
 @admin_namespace.route("/shared/refresh/<int:id>")
@@ -69,7 +189,145 @@ class SharedRefreshSpecific(Resource):
             refresh_shared_chall(id)
             return {"success": True}
         except Exception as e:
-            return {"success": False, "error": repr(e)}
+            logger.exception("failed to refresh shared challenge %s", id)
+            return {"success": False, "message": repr(e)}, 500
+
+
+@admin_namespace.route("/overview")
+class PrismAdminOverview(Resource):
+    @staticmethod
+    def get():
+        instances = [
+            _serialize_instance(instance)
+            for instance in Instances.query.order_by(
+                Instances.started_at.desc(), Instances.id.desc()
+            ).all()
+        ]
+        shared_challenges = [
+            _serialize_shared_challenge(challenge)
+            for challenge in SharedChallenge.query.order_by(
+                SharedChallenge.id.asc()
+            ).all()
+        ]
+        return {
+            "success": True,
+            "instances": instances,
+            "shared_challenges": shared_challenges,
+        }
+
+
+@admin_namespace.route("/instance/<int:instance_id>/logs")
+class PrismInstanceLogs(Resource):
+    @staticmethod
+    def get(instance_id: int):
+        instance = Instances.query.filter_by(id=instance_id).first()
+        if instance is None:
+            return {"success": False, "message": "instance not found"}, 404
+
+        try:
+            logs = get_owned_pod_logs(_get_admin_instance_root(instance))
+        except UserFacingNotFound:
+            return {
+                "success": False,
+                "message": "instance resource not found in kubernetes",
+            }, 404
+        except UserFacingException as e:
+            return {"success": False, "message": e.msg}, 400
+        except Exception:
+            logger.exception("failed to fetch logs for instance %s", instance_id)
+            return {"success": False, "message": "failed to fetch logs"}, 500
+
+        return {"success": True, "logs": logs}
+
+
+@admin_namespace.route("/instance/<int:instance_id>/restart")
+class PrismInstanceRestart(Resource):
+    @staticmethod
+    def post(instance_id: int):
+        instance = Instances.query.filter_by(id=instance_id).first()
+        if instance is None:
+            return {"success": False, "message": "instance not found"}, 404
+
+        try:
+            restarted = restart_owned_rollouts(_get_admin_instance_root(instance))
+        except UserFacingNotFound:
+            return {
+                "success": False,
+                "message": "instance resource not found in kubernetes",
+            }, 404
+        except UserFacingException as e:
+            return {"success": False, "message": e.msg}, 400
+        except Exception:
+            logger.exception("failed to restart workloads for instance %s", instance_id)
+            return {"success": False, "message": "failed to restart workloads"}, 500
+
+        return {"success": True, **restarted}
+
+
+@admin_namespace.route("/shared/<int:id>/logs")
+class PrismSharedLogs(Resource):
+    @staticmethod
+    def get(id: int):
+        challenge = SharedChallenge.query.filter_by(id=id).first()
+        if challenge is None:
+            return {"success": False, "message": "shared challenge not found"}, 404
+
+        try:
+            kube_challenge = get_shared_challenge(id)
+        except Exception:
+            logger.exception("failed to resolve shared challenge %s in kubernetes", id)
+            return {
+                "success": False,
+                "message": "failed to query kubernetes for the shared challenge",
+            }, 500
+        if kube_challenge is None:
+            return {
+                "success": False,
+                "message": "shared challenge resource not found in kubernetes",
+            }, 404
+
+        try:
+            logs = get_owned_pod_logs(kube_challenge)
+        except UserFacingException as e:
+            return {"success": False, "message": e.msg}, 400
+        except Exception:
+            logger.exception("failed to fetch logs for shared challenge %s", id)
+            return {"success": False, "message": "failed to fetch logs"}, 500
+
+        return {"success": True, "logs": logs}
+
+
+@admin_namespace.route("/shared/<int:id>/restart")
+class PrismSharedRestart(Resource):
+    @staticmethod
+    def post(id: int):
+        challenge = SharedChallenge.query.filter_by(id=id).first()
+        if challenge is None:
+            return {"success": False, "message": "shared challenge not found"}, 404
+
+        try:
+            kube_challenge = get_shared_challenge(id)
+        except Exception:
+            logger.exception("failed to resolve shared challenge %s in kubernetes", id)
+            return {
+                "success": False,
+                "message": "failed to query kubernetes for the shared challenge",
+            }, 500
+        if kube_challenge is None:
+            return {
+                "success": False,
+                "message": "shared challenge resource not found in kubernetes",
+            }, 404
+
+        try:
+            restarted = restart_owned_rollouts(kube_challenge)
+        except UserFacingException as e:
+            return {"success": False, "message": e.msg}, 400
+        except Exception:
+            logger.exception("failed to restart workloads for shared challenge %s", id)
+            return {"success": False, "message": "failed to restart workloads"}, 500
+
+        return {"success": True, **restarted}
 
 
 @user_namespace.route("/instance/<int:id>/extend")
@@ -95,7 +353,7 @@ class ExtendIsolatedInstance(Resource):
             return {"success": True}
         except Exception:
             logger.exception("failed to extend instance")
-            return {"success": False}
+            return {"success": False, "message": "failed to extend instance"}, 500
 
 
 @user_namespace.route("/instance/<int:id>")
@@ -120,10 +378,7 @@ class IsolatedInstance(Resource):
                     if ev == prev_ev:
                         continue
                     prev_ev = ev
-                    yield "\n".join([
-                        f"event: {ev_type}",
-                        f"data: {ev}"
-                    ]) + "\n\n"
+                    yield "\n".join([f"event: {ev_type}", f"data: {ev}"]) + "\n\n"
 
             return Response(stream_with_context(gen()), mimetype="text/event-stream")
 
@@ -131,7 +386,6 @@ class IsolatedInstance(Resource):
             return get_instance_status(instance)
         except UserFacingException as e:
             abort(500, e.msg)
-        
 
     @staticmethod
     def put(id: int):
@@ -147,11 +401,11 @@ class IsolatedInstance(Resource):
         try:
             kube_instance = create_instance(get_current_user_account_id(), chal)
         except UserFacingException as e:
-            logger.warn(f"instance creation rejected: {e.args[0]}")
-            return {"success": False, "message": e.args[0]}
+            logger.warning(f"instance creation rejected: {e.msg}")
+            return {"success": False, "message": e.msg}, 400
         except Exception:
             logger.exception("instance creation failed")
-            return {"success": False}
+            return {"success": False, "message": "instance creation failed"}, 500
 
         assert kube_instance.spec
 
@@ -181,10 +435,10 @@ class IsolatedInstance(Resource):
         except UserFacingNotFound:
             abort(404)
         except UserFacingException as e:
-            return {"success": False, "message": e.msg}
+            return {"success": False, "message": e.msg}, 400
         except Exception:
             return {
                 "success": False,
                 "message": "An error occured, please open a ticket",
-            }
+            }, 500
         return {"success": True}

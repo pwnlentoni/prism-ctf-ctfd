@@ -6,8 +6,9 @@ from CTFd.config import Config
 from CTFd.plugins import register_admin_plugin_script, register_plugin_assets_directory
 from CTFd.plugins.challenges import CHALLENGE_CLASSES
 from CTFd.plugins.migrations import upgrade
+from CTFd.utils.decorators import admins_only
 
-from flask import Blueprint
+from flask import Blueprint, render_template
 
 try:
     import lightkube
@@ -72,6 +73,12 @@ def load(app):
     CTFd_API_v1.add_namespace(admin_namespace, path="/plugins/prism_ctf/admin")
     CTFd_API_v1.add_namespace(user_namespace, path="/plugins/prism_ctf")
     app.register_blueprint(page_blueprint)
+
+    @app.route("/admin/prism-ctf")
+    @admins_only
+    def prism_admin_page():
+        return render_template("admin/prism_ctf.html")
+
     logger.info("api namespaces added")
     # TODO: read from config/env
     app.jinja_env.globals.update(prism_default_tcp_port="1337")
