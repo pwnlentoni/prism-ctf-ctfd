@@ -3,7 +3,7 @@ from typing import Any, Mapping, Type, cast
 
 from lightkube.core.resource_registry import resource_registry
 from lightkube.generic_resource import GenericGlobalResource
-from lightkube.resources.apps_v1 import DaemonSet, Deployment, ReplicaSet, StatefulSet
+from lightkube.resources.apps_v1 import Deployment, ReplicaSet
 from lightkube.resources.core_v1 import Namespace, Pod
 from lightkube.types import PatchType
 import lightkube
@@ -25,8 +25,8 @@ TEAM_LABEL = "prism-ctf.pwnlentoni.team/team"
 
 kube = lightkube.Client(field_manager=FIELD_MANAGER)
 
-_OWNED_DISCOVERY_RESOURCES = (Deployment, StatefulSet, DaemonSet, ReplicaSet, Pod)
-_ROLLABLE_RESOURCES = (Deployment, StatefulSet, DaemonSet)
+_OWNED_DISCOVERY_RESOURCES = (Deployment, ReplicaSet, Pod)
+_ROLLABLE_RESOURCES = (Deployment,)
 _MAX_OWNED_RESOURCES = 200
 _MAX_LOG_PODS = 20
 _MAX_LOG_CONTAINERS_PER_POD = 10
@@ -81,6 +81,10 @@ def get_shared_challenge(ctfd_id: int) -> GenericGlobalResource | None:
         return next(iter(challs_iter))
     except StopIteration:
         return None
+
+
+def list_instances():
+    return kube.list(get_chall_instance_type())
 
 
 def get_instance(challenge: int, owner: str):

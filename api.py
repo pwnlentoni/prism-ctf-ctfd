@@ -28,9 +28,11 @@ from .isolated_challenges import (
     instance_name,
 )
 from .k8s import (
+    CTFD_ID_LABEL,
     UserFacingException,
     UserFacingNotFound,
     get_owned_pod_logs,
+    list_instances,
     get_shared_challenge,
     restart_owned_rollouts,
 )
@@ -92,6 +94,48 @@ def _get_admin_instance_root(instance: Instances):
         raise UserFacingException("instance challenge relationship is missing")
     owner_id = _get_instance_owner_id(instance)
     return get_instance(owner_id, instance.challenge)
+
+
+def _active_instance_key_from_resource(resource) -> tuple[int, int] | None:
+    metadata = getattr(resource, "metadata", None)
+    labels = getattr(metadata, "labels", None) or {}
+    spec = getattr(resource, "spec", None) or {}
+
+    challenge_id = labels.get(CTFD_ID_LABEL)
+    owner_id = spec.get("team")
+    if challenge_id is None or owner_id is None:
+        return None
+
+    try:
+        return int(challenge_id), int(owner_id)
+    except (TypeError, ValueError):
+        return None
+
+
+def _list_active_admin_instances() -> list[Instances]:
+    active_keys = {
+        key
+        for resource in list_instances()
+        if (key := _active_instance_key_from_resource(resource)) is not None
+    }
+
+    instances: list[Instances] = []
+    seen_keys: set[tuple[int, int]] = set()
+    for instance in Instances.query.order_by(
+        Instances.started_at.desc(), Instances.id.desc()
+    ).all():
+        if instance.challenge_id is None or instance.challenge is None:
+            continue
+
+        owner_id = _get_instance_owner_id(instance)
+        instance_key = (instance.challenge_id, owner_id)
+        if instance_key not in active_keys or instance_key in seen_keys:
+            continue
+
+        instances.append(instance)
+        seen_keys.add(instance_key)
+
+    return instances
 
 
 def _serialize_instance(instance: Instances) -> dict:
@@ -198,10 +242,7 @@ class PrismAdminOverview(Resource):
     @staticmethod
     def get():
         instances = [
-            _serialize_instance(instance)
-            for instance in Instances.query.order_by(
-                Instances.started_at.desc(), Instances.id.desc()
-            ).all()
+            _serialize_instance(instance) for instance in _list_active_admin_instances()
         ]
         shared_challenges = [
             _serialize_shared_challenge(challenge)
