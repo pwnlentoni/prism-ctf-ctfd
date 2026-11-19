@@ -35,7 +35,13 @@ from ..k8s import (
     get_isolated_chall_type,
     UserFacingNotFound,
 )
-from .utils import get_kube_spec_file, to_bool, constant_time_compare
+from .utils import (
+    get_kube_spec_file,
+    store_inline_kube_spec,
+    discard_inline_kube_spec,
+    to_bool,
+    constant_time_compare,
+)
 from .instance import Instances
 from ..isolated_challenges import delete_instance
 
@@ -104,16 +110,32 @@ class IsolatedValueChallenge(BaseChallenge):
             logger.error(f"invalid creation request data: {data!r}")
             return
 
-        if "yaml_id" not in data:
-            logger.error("missing required `yaml_id`")
-            raise ChallengeCreateException("missing required `yaml_id`")
+        # connection_info is owned by the plugin (filled in from kube status for shared
+        # challenges, unused for isolated ones): ignore client values, e.g. the `null`
+        # ctfcli always sends, so they can't wipe it or break read()
+        data.pop("connection_info", None)
 
         if "destroy_on_flag" in data:
             data["destroy_on_flag"] = to_bool(data["destroy_on_flag"])
 
-        challenge = cls.challenge_model(**data)
-        db.session.add(challenge)
-        db.session.commit()
+        try:
+            inline_file_id = store_inline_kube_spec(data, ISOLATED_KIND, data.get("name", ""))
+        except ValueError as e:
+            logger.error(f"invalid inline kube_spec: {e}")
+            raise ChallengeCreateException(str(e)) from e
+
+        if "yaml_id" not in data:
+            logger.error("missing required `yaml_id`")
+            raise ChallengeCreateException("missing required `yaml_id`")
+
+        try:
+            challenge = cls.challenge_model(**data)
+            db.session.add(challenge)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            discard_inline_kube_spec(inline_file_id)
+            raise
 
         logger.info(f"created CTFd challenge {challenge.name!r} [id: {challenge.id}]")
 
@@ -125,6 +147,7 @@ class IsolatedValueChallenge(BaseChallenge):
             )
             super().delete(challenge)
             logger.info(f"deleted successfully {challenge.name!r}")
+            discard_inline_kube_spec(inline_file_id)
             raise ChallengeCreateException(
                 f"spec validation failed: {e.args[0]}"
             ) from e
@@ -139,6 +162,7 @@ class IsolatedValueChallenge(BaseChallenge):
             )
             super().delete(challenge)
             logger.info(f"deleted successfully {challenge.name!r}")
+            discard_inline_kube_spec(inline_file_id)
             if isinstance(e, ApiError):
                 raise ChallengeCreateException(
                     f"kube apply failed: {e.status.message}"
@@ -178,15 +202,41 @@ class IsolatedValueChallenge(BaseChallenge):
         )
         data = request.form.to_dict() or request.get_json()
 
+        # connection_info is owned by the plugin (filled in from kube status for shared
+        # challenges, unused for isolated ones): ignore client values, e.g. the `null`
+        # ctfcli always sends, so they can't wipe it or break read()
+        data.pop("connection_info", None)
+
+        if "destroy_on_flag" in data.keys():
+            data["destroy_on_flag"] = to_bool(data["destroy_on_flag"])  # type: ignore
+
+        try:
+            inline_file_id = store_inline_kube_spec(
+                data, ISOLATED_KIND, data.get("name") or challenge.name
+            )
+        except ValueError as e:
+            logger.error(f"invalid inline kube_spec: {e}")
+            raise ChallengeUpdateException(str(e)) from e
+
         if "yaml_id" in data:
             challenge.yaml_id = data["yaml_id"]
-            chal_spec = get_kube_spec_file(challenge.yaml_id, ISOLATED_KIND)
+            try:
+                chal_spec = get_kube_spec_file(challenge.yaml_id, ISOLATED_KIND)
+            except Exception as e:
+                logger.exception(
+                    f"spec get failed for isolated chall {challenge.name!r} [id: {challenge.id}]"
+                )
+                db.session.rollback()  # undo the yaml_id change
+                discard_inline_kube_spec(inline_file_id)
+                raise ChallengeUpdateException(f"spec validation failed: {e}") from e
             try:
                 kube.apply(chal_spec, field_manager=FIELD_MANAGER)
             except Exception as e:
                 logger.exception(
                     f"kube apply failed for isolated chall {challenge.name!r} [id: {challenge.id}]"
                 )
+                db.session.rollback()  # undo the yaml_id change
+                discard_inline_kube_spec(inline_file_id)
 
                 if isinstance(e, ApiError):
                     raise ChallengeUpdateException(
@@ -196,9 +246,6 @@ class IsolatedValueChallenge(BaseChallenge):
                     raise ChallengeUpdateException("kube apply failed") from e
             cache.delete_memoized(IsolatedChallenge.get_kube_name)
             cache.delete_memoized(IsolatedChallenge.get_lifetime)
-
-        if "destroy_on_flag" in data.keys():
-            data["destroy_on_flag"] = to_bool(data["destroy_on_flag"])  # type: ignore
 
         return super().update(challenge, request)
 
