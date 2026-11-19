@@ -1,5 +1,5 @@
+import os
 import sys
-import subprocess
 
 from CTFd.api import CTFd_API_v1
 from CTFd.config import Config
@@ -10,13 +10,12 @@ from CTFd.utils.decorators import admins_only
 
 from flask import Blueprint, render_template
 
-try:
-    import lightkube
-except ModuleNotFoundError:
-    # this atrocious thing is a workaround for CTFd only installing `requirements.txt` at docker build time
-    # this allows us to just mount the plugin as a volume and have everything just work.
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "lightkube==0.19.1"])
-    import lightkube  # noqa: F401
+# Python deps vendored next to the plugin (see Dockerfile), so the plugin can be
+# mounted into a stock CTFd image. Appended, not prepended, so CTFd's own pinned
+# packages win on conflicts.
+_VENDOR_DIR = os.path.join(os.path.dirname(__file__), "vendor")
+if os.path.isdir(_VENDOR_DIR) and _VENDOR_DIR not in sys.path:
+    sys.path.append(_VENDOR_DIR)
 
 from lightkube.generic_resource import load_in_cluster_generic_resources
 
