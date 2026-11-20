@@ -1,0 +1,149 @@
+# Minimal CTFd for the e2e: stock ctfd/ctfd:3.8.9 on SQLite, valkey for cache/SSE, the
+# plugin image (built from the working tree and `kind load`ed by run.sh) mounted as an
+# image volume. RBAC as in the infra repo (terraform/10-cluster/manifests/ctfd.yaml.tftpl).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ctfd
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkey
+  namespace: ctfd
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: valkey }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: valkey }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: valkey
+          image: valkey/valkey:9.2
+          args: ["--save", "", "--appendonly", "no"]
+          ports: [{ containerPort: 6379 }]
+          readinessProbe:
+            tcpSocket: { port: 6379 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey
+  namespace: ctfd
+spec:
+  selector: { app.kubernetes.io/name: valkey }
+  ports: [{ port: 6379, targetPort: 6379 }]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ctfd
+  namespace: ctfd
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ctfd-prism-ctf-plugin
+rules:
+  - apiGroups: [apiextensions.k8s.io] # lightkube loads the prism CRDs at startup
+    resources: [customresourcedefinitions]
+    verbs: [get, list]
+  - apiGroups: [""] # instance lookup by namespace labels
+    resources: [namespaces]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ctfd-prism-ctf-plugin
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: ctfd-prism-ctf-plugin }
+subjects: [{ kind: ServiceAccount, name: ctfd, namespace: ctfd }]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ctfd-prism-ctf-challengeinstance-editor
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: prism-ctf-challengeinstance-editor-role }
+subjects: [{ kind: ServiceAccount, name: ctfd, namespace: ctfd }]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ctfd-prism-ctf-sharedchallenge-editor
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: prism-ctf-sharedchallenge-editor-role }
+subjects: [{ kind: ServiceAccount, name: ctfd, namespace: ctfd }]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ctfd-prism-ctf-isolatedchallenge-editor
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: prism-ctf-isolatedchallenge-editor-role }
+subjects: [{ kind: ServiceAccount, name: ctfd, namespace: ctfd }]
+---
+# The operator binds this SA to prism-ctf-challenge-manager-role in every challenge namespace.
+apiVersion: prism-ctf.pwnlentoni.team/v1
+kind: PrismServiceAccount
+metadata:
+  name: ctfd
+spec:
+  namespace: ctfd
+  name: ctfd
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ctfd
+  namespace: ctfd
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app.kubernetes.io/name: ctfd }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: ctfd }
+    spec:
+      serviceAccountName: ctfd
+      containers:
+        - name: ctfd
+          image: ctfd/ctfd:3.8.9
+          ports: [{ name: http, containerPort: 8000 }]
+          env:
+            - { name: SECRET_KEY, value: e2e-not-a-secret }
+            - { name: REDIS_URL, value: "redis://valkey:6379" }
+            - { name: WORKERS, value: "1" }
+            - { name: LOG_LEVEL, value: DEBUG }
+            - { name: PRESET_CONFIGS, value: '{"setup": true, "user_mode": "users"}' }
+            - { name: PRESET_ADMIN_NAME, value: admin }
+            - { name: PRESET_ADMIN_EMAIL, value: admin@e2e.test }
+            - { name: PRESET_ADMIN_PASSWORD, value: e2e-admin-password }
+            # test-only token, also hardcoded in run.sh
+            - { name: PRESET_ADMIN_TOKEN, value: ctfd_e2e0000000000000000000000000000000000000000000000000000000000 }
+          volumeMounts:
+            - { name: prism-plugin, mountPath: /opt/CTFd/CTFd/plugins/prism_ctf, readOnly: true }
+          startupProbe:
+            httpGet: { path: /healthcheck, port: http }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /healthcheck, port: http }
+            periodSeconds: 10
+      volumes:
+        - name: prism-plugin
+          image:
+            reference: docker.io/library/prism-ctf-ctfd:e2e
+            pullPolicy: IfNotPresent
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ctfd
+  namespace: ctfd
+spec:
+  selector: { app.kubernetes.io/name: ctfd }
+  ports: [{ name: http, port: 80, targetPort: http }]

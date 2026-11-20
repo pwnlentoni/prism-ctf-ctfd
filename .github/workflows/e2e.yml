@@ -1,0 +1,31 @@
+name: e2e
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install kind and ctfcli
+        run: |
+          # same version as tests/e2e/run.sh (kindest/node v1.36 needs >= v0.33.0)
+          curl -fsSLo kind https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64
+          echo "aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d  kind" | sha256sum -c -
+          sudo install -m 0755 kind /usr/local/bin/kind && rm kind
+          pip install ctfcli==0.1.8
+          kind version && kubectl version --client && helm version --short
+
+      - name: Run e2e
+        run: tests/e2e/run.sh

@@ -90,6 +90,17 @@ so when building it yourself build for the platform CTFd runs on (`docker build 
 
 ## Creating challenges
 
+### Connection info
+
+Shared challenges show players the URLs from the `SharedChallenge`'s
+`status.exposedUrls`. They are kept in sync automatically: whenever a challenge is
+read (player view, admin, ctfcli), the plugin compares the stored value with the live
+status (cached in Redis for 30 s, 5 s while the challenge isn't ready) and stores it
+when it changed, so the URLs appear once the operator has reconciled the challenge and
+follow later hostname changes. Until then players see "This challenge is starting up".
+If the cluster is unreachable the last known value is kept. The admin endpoints
+`POST /api/v1/plugins/prism_ctf/admin/shared/refresh[/<id>]` force a refresh.
+
 ### Admin UI
 
 Pick the `prism_shared` / `prism_isolated` type and upload the YAML spec of the
@@ -193,9 +204,9 @@ extra:
           protocol: HTTP
 ```
 
-`connection_info` is owned by the plugin (shared challenges get it from the cluster
-status), so any `connection_info` in the create/update payload is ignored, including
-the `null` ctfcli always sends: a plain `ctf challenge sync` won't clear it.
+`connection_info` is owned by the plugin (see [Connection info](#connection-info)), so
+any `connection_info` in the create/update payload is ignored, including the `null`
+ctfcli always sends: a plain `ctf challenge sync` won't clear it.
 
 `ctf challenge verify` compares `extra` with what CTFd returns, which never matches
 for these types, so use `ctf challenge verify --ignore=extra`. For shared challenges
@@ -213,7 +224,9 @@ Then mount (or symlink) the repository as `CTFd/plugins/prism_ctf` in a CTFd 3.8
 checkout or container. `requirements.txt` is hash-pinned and generated with
 `uv export --locked --no-dev > requirements.txt`.
 
-The `kube_spec` create/update path can be tested against a stock CTFd image, with
+### Tests
+
+The create/update and connection-info logic is tested against a stock CTFd image, with
 Kubernetes faked:
 
 ```sh
@@ -223,3 +236,19 @@ docker run --rm \
   -v "$PWD/tests:/work:ro" -w /opt/CTFd --entrypoint python \
   ctfd/ctfd:3.8.9 /work/ctfd_kube_spec_test.py
 ```
+
+The end-to-end test runs the real thing in [kind](https://kind.sigs.k8s.io/): the
+prism-ctf operator (`v0.1.0` release) and its dependencies, and stock CTFd 3.8.9 with
+the plugin image built from the working tree. Through the CTFd API and ctfcli it
+installs a shared challenge, checks that its connection info appears without any
+refresh call, changes the exposed hostname with `ctf challenge sync` and checks that
+CTFd follows. It needs docker, kubectl, helm and ctfcli (`pip install ctfcli`); kind
+v0.33.0 or newer is used from `PATH`, or downloaded into `tests/e2e/.bin`. It uses its
+own kubeconfig file (never `~/.kube/config`):
+
+```sh
+tests/e2e/run.sh          # creates the prism-ctfd-e2e cluster, runs, deletes it
+KEEP=1 tests/e2e/run.sh   # keeps the cluster; re-running reuses it
+```
+
+It also runs on every pull request (`.github/workflows/e2e.yml`).

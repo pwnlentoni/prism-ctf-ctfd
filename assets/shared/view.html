@@ -11,9 +11,8 @@
 {% block description %}
 {{ super() }}
 {% if not challenge.connection_info %}
-    <div class="alert alert-danger" role="alert">
-        <span class="sr-only">Error:</span>
-        An error occured, please open a ticket mentioning the challenge name.
+    <div class="alert alert-info" role="status">
+        This challenge is starting up, check back in a minute.
     </div>
 {% endif %}
 {% endblock %}
