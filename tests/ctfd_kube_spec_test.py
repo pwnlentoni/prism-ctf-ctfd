@@ -72,6 +72,38 @@ def fake_apply(obj, field_manager=None):
 
 k8s.kube.apply = fake_apply
 
+# fake SharedChallenge CRs as seen by the plugin: ctfd id -> status (no entry: CR missing)
+from CTFd.plugins.prism_ctf import shared_challenges as sc
+
+crs = {}
+kube_down = {"on": False}
+kube_calls = []
+
+
+def fake_cr(ctfd_id):
+    return k8s.get_shared_chall_type()(
+        {
+            "apiVersion": "prism-ctf.pwnlentoni.team/v1",
+            "kind": "SharedChallenge",
+            "metadata": {
+                "name": f"chal-{ctfd_id}",
+                "labels": {k8s.CTFD_ID_LABEL: str(ctfd_id)},
+            },
+            "status": crs[ctfd_id],
+        }
+    )
+
+
+def fake_get_shared_challenge(ctfd_id):
+    kube_calls.append(ctfd_id)
+    if kube_down["on"]:
+        raise RuntimeError("kube unreachable")
+    return fake_cr(ctfd_id) if ctfd_id in crs else None
+
+
+sc.get_shared_challenge = fake_get_shared_challenge
+sc.list_shared_challenges = lambda: [fake_cr(i) for i in crs]
+
 # make loading the stored spec fail on demand (create/update "spec validation failed" path)
 from CTFd.plugins.prism_ctf.models import isolated as iso_mod
 from CTFd.plugins.prism_ctf.models import shared as shared_mod
@@ -599,6 +631,151 @@ with app.app_context():
         and Challenges.query.filter_by(id=sid).first().yaml_id == new_yid,
         f"{before} -> {state()}",
     )
+
+    # 12. shared connection_info follows the CR status without a manual refresh
+    r = c.post(
+        "/api/v1/challenges",
+        json=ctfcli_payload("auto", "prism_shared", {"kube_spec": SHARED}),
+        headers=H,
+    )
+    aid = r.get_json()["data"]["id"]
+
+    def urls(name):
+        return [
+            {
+                "name": name,
+                "hostname": f"whoami-tcp-{name}.challs.test",
+                "protocol": "TCP",
+            }
+        ]
+
+    def view(chal_id):
+        db.session.expire_all()
+        r = c.get(f"/api/v1/challenges/{chal_id}", headers=H)
+        d = r.get_json()["data"]
+        stored = Challenges.query.filter_by(id=chal_id).first().connection_info
+        return r.status_code, d["connection_info"], d["view"], stored
+
+    crs[aid] = {}  # CR exists, no exposedUrls yet
+    status, conn, html, stored = view(aid)
+    check(
+        "pending: no connection_info, view shows starting-up message",
+        status == 200
+        and conn is None
+        and stored is None
+        and "starting up" in html
+        and "open a ticket" not in html,
+        f"{status} {conn} {stored}",
+    )
+
+    crs[aid] = {"exposedUrls": urls("a")}
+    status, conn, html, stored = view(aid)
+    check("pending value is cached briefly", conn is None, conn)
+    sc.invalidate_connection_info(aid)
+    status, conn, html, stored = view(aid)
+    check(
+        "first fill: URLs returned, persisted and rendered",
+        status == 200
+        and conn == urls("a")
+        and stored == json.dumps(urls("a"))
+        and "starting up" not in html,
+        f"{status} {conn} {stored}",
+    )
+    n_calls = len(kube_calls)
+    view(aid)
+    check("ready value cached: no extra kube call", len(kube_calls) == n_calls)
+
+    crs[aid] = {"exposedUrls": urls("b")}
+    status, conn, html, stored = view(aid)
+    check("hostname change not visible before cache expiry", conn == urls("a"))
+    sc.invalidate_connection_info(aid)
+    status, conn, html, stored = view(aid)
+    check(
+        "hostname change picked up and persisted",
+        conn == urls("b") and stored == json.dumps(urls("b")),
+        f"{conn} {stored}",
+    )
+
+    crs[aid] = {"exposedUrls": urls("c")}
+    spec3 = json.loads(json.dumps(SHARED))
+    spec3["spec"]["exposes"][0]["name"] = "c"
+    r = c.patch(
+        f"/api/v1/challenges/{aid}",
+        json=ctfcli_payload("auto", "prism_shared", {"kube_spec": spec3}),
+        headers=H,
+    )
+    status, conn, html, stored = view(aid)
+    check(
+        "spec update invalidates the cache",
+        r.status_code == 200 and conn == urls("c") and stored == json.dumps(urls("c")),
+        f"{r.status_code} {conn} {stored}",
+    )
+    crs[aid] = {"exposedUrls": urls("d")}
+    c.patch(
+        f"/api/v1/challenges/{aid}",
+        json=ctfcli_payload("auto", "prism_shared", {}),
+        headers=H,
+    )
+    status, conn, html, stored = view(aid)
+    check("update without spec change keeps the cache", conn == urls("c"), conn)
+
+    sc.invalidate_connection_info(aid)
+    kube_down["on"] = True
+    try:
+        status, conn, html, stored = view(aid)
+    finally:
+        kube_down["on"] = False
+    check(
+        "kube error: 200 with the stored value",
+        status == 200 and conn == urls("c") and stored == json.dumps(urls("c")),
+        f"{status} {conn}",
+    )
+
+    for label, cr in (("not ready", {}), ("empty exposedUrls", {"exposedUrls": []})):
+        crs[aid] = cr
+        sc.invalidate_connection_info(aid)
+        status, conn, html, stored = view(aid)
+        check(
+            f"CR {label}: stored value kept",
+            status == 200 and conn == urls("c") and stored == json.dumps(urls("c")),
+            f"{status} {conn}",
+        )
+    del crs[aid]
+    sc.invalidate_connection_info(aid)
+    status, conn, html, stored = view(aid)
+    check("CR missing: stored value kept", status == 200 and conn == urls("c"), conn)
+
+    crs[aid] = {"exposedUrls": urls("e")}
+    r = c.post(
+        f"/api/v1/plugins/prism_ctf/admin/shared/refresh/{aid}", json={}, headers=H
+    )
+    db.session.expire_all()
+    check(
+        "admin refresh (one) bypasses the cache and persists",
+        r.status_code == 200
+        and r.get_json()["success"]
+        and Challenges.query.filter_by(id=aid).first().connection_info
+        == json.dumps(urls("e")),
+        f"{r.status_code} {r.get_json()}",
+    )
+    crs[aid] = {"exposedUrls": urls("f")}
+    r = c.post("/api/v1/plugins/prism_ctf/admin/shared/refresh", json={}, headers=H)
+    status, conn, html, stored = view(aid)
+    check(
+        "admin refresh (all) persists and refreshes the cache",
+        r.status_code == 200 and r.get_json()["success"] and conn == urls("f"),
+        f"{r.status_code} {r.get_json()} {conn}",
+    )
+    crs[aid] = {}
+    r = c.post(
+        f"/api/v1/plugins/prism_ctf/admin/shared/refresh/{aid}", json={}, headers=H
+    )
+    check(
+        "admin refresh of a not-ready CR reports failure",
+        r.status_code == 500 and not r.get_json()["success"],
+        f"{r.status_code} {r.get_json()}",
+    )
+    del crs[aid]
 
     # 9. read via GET (what ctfcli load_installed_challenge uses)
     r = c.get(f"/api/v1/challenges/{sid}", headers=H)

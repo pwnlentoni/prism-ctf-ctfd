@@ -90,6 +90,17 @@ so when building it yourself build for the platform CTFd runs on (`docker build 
 
 ## Creating challenges
 
+### Connection info
+
+Shared challenges show players the URLs from the `SharedChallenge`'s
+`status.exposedUrls`. They are kept in sync automatically: whenever a challenge is
+read (player view, admin, ctfcli), the plugin compares the stored value with the live
+status (cached in Redis for 30 s, 5 s while the challenge isn't ready) and stores it
+when it changed, so the URLs appear once the operator has reconciled the challenge and
+follow later hostname changes. Until then players see "This challenge is starting up".
+If the cluster is unreachable the last known value is kept. The admin endpoints
+`POST /api/v1/plugins/prism_ctf/admin/shared/refresh[/<id>]` force a refresh.
+
 ### Admin UI
 
 Pick the `prism_shared` / `prism_isolated` type and upload the YAML spec of the
@@ -193,9 +204,9 @@ extra:
           protocol: HTTP
 ```
 
-`connection_info` is owned by the plugin (shared challenges get it from the cluster
-status), so any `connection_info` in the create/update payload is ignored, including
-the `null` ctfcli always sends: a plain `ctf challenge sync` won't clear it.
+`connection_info` is owned by the plugin (see [Connection info](#connection-info)), so
+any `connection_info` in the create/update payload is ignored, including the `null`
+ctfcli always sends: a plain `ctf challenge sync` won't clear it.
 
 `ctf challenge verify` compares `extra` with what CTFd returns, which never matches
 for these types, so use `ctf challenge verify --ignore=extra`. For shared challenges
@@ -213,7 +224,9 @@ Then mount (or symlink) the repository as `CTFd/plugins/prism_ctf` in a CTFd 3.8
 checkout or container. `requirements.txt` is hash-pinned and generated with
 `uv export --locked --no-dev > requirements.txt`.
 
-The `kube_spec` create/update path can be tested against a stock CTFd image, with
+### Tests
+
+The create/update and connection-info logic is tested against a stock CTFd image, with
 Kubernetes faked:
 
 ```sh
