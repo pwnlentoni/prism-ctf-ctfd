@@ -236,3 +236,19 @@ docker run --rm \
   -v "$PWD/tests:/work:ro" -w /opt/CTFd --entrypoint python \
   ctfd/ctfd:3.8.9 /work/ctfd_kube_spec_test.py
 ```
+
+The end-to-end test runs the real thing in [kind](https://kind.sigs.k8s.io/): the
+prism-ctf operator (`v0.1.0` release) and its dependencies, and stock CTFd 3.8.9 with
+the plugin image built from the working tree. Through the CTFd API and ctfcli it
+installs a shared challenge, checks that its connection info appears without any
+refresh call, changes the exposed hostname with `ctf challenge sync` and checks that
+CTFd follows. It needs docker, kubectl, helm and ctfcli (`pip install ctfcli`); kind
+v0.33.0 or newer is used from `PATH`, or downloaded into `tests/e2e/.bin`. It uses its
+own kubeconfig file (never `~/.kube/config`):
+
+```sh
+tests/e2e/run.sh          # creates the prism-ctfd-e2e cluster, runs, deletes it
+KEEP=1 tests/e2e/run.sh   # keeps the cluster; re-running reuses it
+```
+
+It also runs on every pull request (`.github/workflows/e2e.yml`).

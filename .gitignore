@@ -11,3 +11,6 @@ wheels/
 
 # Vendored deps for local dev (see README)
 vendor/
+
+# e2e: pinned kind downloaded by tests/e2e/run.sh
+tests/e2e/.bin/
