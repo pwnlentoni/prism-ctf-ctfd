@@ -15,7 +15,11 @@ import json
 from .blueprint import blueprint
 from ..utils import get_logger, get_current_user, ASSETS_DIR
 from ..k8s import kube, FIELD_MANAGER, SHARED_KIND, CTFD_ID_LABEL, get_shared_chall_type
-from .utils import get_kube_spec_file
+from .utils import (
+    get_kube_spec_file,
+    store_inline_kube_spec,
+    discard_inline_kube_spec,
+)
 
 logger = get_logger(__name__)
 
@@ -80,13 +84,29 @@ class SharedValueChallenge(BaseChallenge):
             logger.error(f"invalid creation request data: {data!r}")
             return
 
+        # connection_info is owned by the plugin (filled in from kube status for shared
+        # challenges, unused for isolated ones): ignore client values, e.g. the `null`
+        # ctfcli always sends, so they can't wipe it or break read()
+        data.pop("connection_info", None)
+
+        try:
+            inline_file_id = store_inline_kube_spec(data, SHARED_KIND, data.get("name", ""))
+        except ValueError as e:
+            logger.error(f"invalid inline kube_spec: {e}")
+            raise ChallengeCreateException(str(e)) from e
+
         if "yaml_id" not in data.keys():
             logger.error("missing required `yaml_id`")
             raise ChallengeCreateException("missing required `yaml_id`")
 
-        challenge = cls.challenge_model(**data)
-        db.session.add(challenge)
-        db.session.commit()
+        try:
+            challenge = cls.challenge_model(**data)
+            db.session.add(challenge)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            discard_inline_kube_spec(inline_file_id)
+            raise
 
         logger.info(f"created CTFd challenge {challenge.name!r} [id: {challenge.id}]")
 
@@ -98,6 +118,7 @@ class SharedValueChallenge(BaseChallenge):
             )
             super().delete(challenge)
             logger.info(f"deleted successfully {challenge.name!r}")
+            discard_inline_kube_spec(inline_file_id)
             raise ChallengeCreateException(
                 f"spec validation failed: {e.args[0]}"
             ) from e
@@ -112,6 +133,7 @@ class SharedValueChallenge(BaseChallenge):
             )
             super().delete(challenge)
             logger.info(f"deleted successfully {challenge.name!r}")
+            discard_inline_kube_spec(inline_file_id)
 
             if isinstance(e, ApiError):
                 raise ChallengeCreateException(
@@ -153,15 +175,38 @@ class SharedValueChallenge(BaseChallenge):
         )
         data = request.form.to_dict() or request.get_json()
 
+        # connection_info is owned by the plugin (filled in from kube status for shared
+        # challenges, unused for isolated ones): ignore client values, e.g. the `null`
+        # ctfcli always sends, so they can't wipe it or break read()
+        data.pop("connection_info", None)
+
+        try:
+            inline_file_id = store_inline_kube_spec(
+                data, SHARED_KIND, data.get("name") or challenge.name
+            )
+        except ValueError as e:
+            logger.error(f"invalid inline kube_spec: {e}")
+            raise ChallengeUpdateException(str(e)) from e
+
         if "yaml_id" in data:
             challenge.yaml_id = data["yaml_id"]
-            chal_spec = cls.get_kube_spec(challenge)
+            try:
+                chal_spec = cls.get_kube_spec(challenge)
+            except Exception as e:
+                logger.exception(
+                    f"spec get failed for shared chall {challenge.name!r} [id: {challenge.id}]"
+                )
+                db.session.rollback()  # undo the yaml_id change
+                discard_inline_kube_spec(inline_file_id)
+                raise ChallengeUpdateException(f"spec validation failed: {e}") from e
             try:
                 kube.apply(chal_spec, field_manager=FIELD_MANAGER)
             except Exception as e:
                 logger.exception(
                     f"kube apply failed for shared chall {challenge.name!r} [id: {challenge.id}]"
                 )
+                db.session.rollback()  # undo the yaml_id change
+                discard_inline_kube_spec(inline_file_id)
                 if isinstance(e, ApiError):
                     raise ChallengeUpdateException(
                         f"kube apply failed: {e.status.message}"
