@@ -15,6 +15,7 @@ import json
 from .blueprint import blueprint
 from ..utils import get_logger, get_current_user, ASSETS_DIR
 from ..k8s import kube, FIELD_MANAGER, SHARED_KIND, CTFD_ID_LABEL, get_shared_chall_type
+from ..shared_challenges import invalidate_connection_info, sync_connection_info
 from .utils import (
     get_kube_spec_file,
     store_inline_kube_spec,
@@ -75,7 +76,6 @@ class SharedValueChallenge(BaseChallenge):
 
     @classmethod
     def create(cls, request: Request):
-        #TODO: refresh challenge after creation + kube ready
         user = get_current_user()
         logger.debug(f"shared challenge created by {user.name!r} [id: {user.id}]")
         data = request.form.to_dict() or request.get_json()
@@ -127,6 +127,7 @@ class SharedValueChallenge(BaseChallenge):
             logger.info(f"pushing challenge {challenge.name!r} spec to kube")
             kube.apply(chal_spec, field_manager=FIELD_MANAGER)
             logger.info(f"succesfully pushed challenge {challenge.name!r} spec to kube")
+            invalidate_connection_info(challenge.id)
         except Exception as e:
             logger.exception(
                 f"kube apply failed for {challenge.name!r}, deleting from CTFd"
@@ -155,6 +156,9 @@ class SharedValueChallenge(BaseChallenge):
         chal: SharedChallenge = SharedChallenge.query.filter_by(
             id=challenge.id
         ).first()
+        # CTFd renders the challenge view from this same session object right after
+        # read(), so the synced value also reaches the player view in this response
+        sync_connection_info(chal)
         data = super().read(chal)
         data.update(
             {
@@ -168,7 +172,6 @@ class SharedValueChallenge(BaseChallenge):
 
     @classmethod
     def update(cls, challenge: SharedChallenge, request: Request):
-        #TODO: refresh challenge after kube picks it up and marks it ready
         user = get_current_user()
         logger.debug(
             f"shared challenge update requested by {user.name!r} [id: {user.id}] for {challenge.name!r} [id: {challenge.id}]"
@@ -213,6 +216,7 @@ class SharedValueChallenge(BaseChallenge):
                     ) from e
                 else:
                     raise ChallengeUpdateException("kube apply failed") from e
+            invalidate_connection_info(challenge.id)
 
         return super().update(challenge, request)
 
